@@ -2297,11 +2297,24 @@ button.preliminary-card--compact:hover {
 
 .match-result-modal__meta,
 .match-format-summary,
-.match-result-actions {
+.match-result-actions,
+.match-result-actions__primary {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
   align-items: center;
+}
+
+.match-result-actions {
+  justify-content: space-between;
+}
+
+.match-result-actions__primary {
+  justify-content: flex-start;
+}
+
+.match-result-actions__close {
+  margin-left: auto;
 }
 
 .match-result-modal__meta,
@@ -2663,7 +2676,17 @@ button.preliminary-card--compact:hover {
   }
 
   .match-result-actions {
+    display: grid;
     align-items: stretch;
+  }
+
+  .match-result-actions__primary {
+    display: grid;
+    width: 100%;
+  }
+
+  .match-result-actions__close {
+    margin-left: 0;
   }
 
   .match-result-actions .button {

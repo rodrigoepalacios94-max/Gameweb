@@ -5,7 +5,7 @@ import { BracketMatch } from "./BracketMatch";
 
 const ROUND_WIDTH = 260;
 const ROUND_GAP = 86;
-const BRACKET_HEIGHT = 920;
+const BRACKET_HEIGHT = 1520;
 const MATCH_HEIGHT = 92;
 const HEADER_HEIGHT = 44;
 
@@ -117,7 +117,7 @@ function connectionPath(connection) {
 
 export function TournamentBracket({ bracket, detailBasePath = "/admin/matches", onMatchOpen }) {
   const scrollRef = useRef(null);
-  const dragState = useRef({ active: false, startX: 0, scrollLeft: 0, moved: false });
+  const dragState = useRef({ active: false, pointerId: null, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0, moved: false });
   const [dragging, setDragging] = useState(false);
   const [hasInteracted, setHasInteracted] = useState(false);
 
@@ -186,6 +186,18 @@ export function TournamentBracket({ bracket, detailBasePath = "/admin/matches", 
     return () => window.cancelAnimationFrame(frame);
   }, [layout.width]);
 
+  useEffect(() => {
+    if (!dragging) return undefined;
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopDrag);
+    window.addEventListener("pointercancel", stopDrag);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopDrag);
+      window.removeEventListener("pointercancel", stopDrag);
+    };
+  }, [dragging]);
+
   function scrollByAmount(direction) {
     const scroller = scrollRef.current;
     if (!scroller) return;
@@ -198,23 +210,34 @@ export function TournamentBracket({ bracket, detailBasePath = "/admin/matches", 
     if (event.button !== 0 || (target instanceof Element && target.closest(".bracket-match"))) return;
     dragState.current = {
       active: true,
+      pointerId: event.pointerId,
       startX: event.clientX,
+      startY: event.clientY,
       scrollLeft: scrollRef.current?.scrollLeft || 0,
+      scrollTop: scrollRef.current?.scrollTop || 0,
       moved: false,
     };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
     setDragging(true);
     setHasInteracted(true);
   }
 
   function handlePointerMove(event) {
     if (!dragState.current.active || !scrollRef.current) return;
-    const delta = event.clientX - dragState.current.startX;
-    if (Math.abs(delta) > 4) dragState.current.moved = true;
-    scrollRef.current.scrollLeft = dragState.current.scrollLeft - delta;
+    event.preventDefault();
+    const deltaX = event.clientX - dragState.current.startX;
+    const deltaY = event.clientY - dragState.current.startY;
+    if (Math.hypot(deltaX, deltaY) > 4) dragState.current.moved = true;
+    scrollRef.current.scrollLeft = dragState.current.scrollLeft - deltaX;
+    scrollRef.current.scrollTop = dragState.current.scrollTop - deltaY;
   }
 
   function stopDrag() {
+    if (dragState.current.pointerId != null && scrollRef.current?.hasPointerCapture?.(dragState.current.pointerId)) {
+      scrollRef.current.releasePointerCapture?.(dragState.current.pointerId);
+    }
     dragState.current.active = false;
+    dragState.current.pointerId = null;
     setDragging(false);
   }
 
@@ -230,7 +253,7 @@ export function TournamentBracket({ bracket, detailBasePath = "/admin/matches", 
           <Button variant="ghost" size="icon" icon={ChevronRight} onClick={() => scrollByAmount(1)}>Derecha</Button>
         </div>
       </div>
-      <p className={hasInteracted ? "bracket-hint is-muted" : "bracket-hint"}>Arrastra para explorar el cuadro. Tambien podes usar el scroll horizontal.</p>
+      <p className={hasInteracted ? "bracket-hint is-muted" : "bracket-hint"}>Arrastra para explorar el cuadro en cualquier direccion. Tambien podes usar el scroll horizontal y vertical.</p>
       <div
         ref={scrollRef}
         className={dragging ? "bracket-scroll bracket-scroll--mirrored is-dragging" : "bracket-scroll bracket-scroll--mirrored"}

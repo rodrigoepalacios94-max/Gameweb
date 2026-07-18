@@ -259,16 +259,18 @@ export function MatchResultModal({ open, matchId, onClose, onSaved }) {
           {formError ? <p className="field-error">{formError}</p> : null}
 
           <div className="match-result-actions">
-            <Button variant="ghost" icon={Save} disabled={Boolean(busyAction)} onClick={savePartial}>
-              {busyAction === "partial" ? "Guardando..." : "Guardar parcial"}
-            </Button>
-            <Button icon={CheckCircle2} disabled={Boolean(busyAction)} onClick={finalizeResult}>
-              {busyAction === "finalize" ? "Finalizando..." : "Finalizar partido"}
-            </Button>
-            <Button variant="secondary" icon={AlertTriangle} disabled={Boolean(busyAction)} onClick={() => { setWalkoverOpen((current) => !current); setDirty(true); }}>
-              Registrar W.O.
-            </Button>
-            <Button variant="ghost" onClick={closeClean}>Cerrar</Button>
+            <div className="match-result-actions__primary">
+              <Button icon={CheckCircle2} disabled={Boolean(busyAction)} onClick={finalizeResult}>
+                {busyAction === "finalize" ? "Finalizando..." : "Finalizar partido"}
+              </Button>
+              <Button variant="ghost" icon={Save} disabled={Boolean(busyAction)} onClick={savePartial}>
+                {busyAction === "partial" ? "Guardando..." : "Guardar parcial"}
+              </Button>
+              <Button variant="secondary" icon={AlertTriangle} disabled={Boolean(busyAction)} onClick={() => { setWalkoverOpen((current) => !current); setDirty(true); }}>
+                Registrar W.O.
+              </Button>
+            </div>
+            <Button className="match-result-actions__close" variant="ghost" onClick={closeClean}>Cerrar</Button>
           </div>
 
           {walkoverOpen ? (
