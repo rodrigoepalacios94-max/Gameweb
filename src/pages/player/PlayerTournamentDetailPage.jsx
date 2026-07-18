@@ -1,25 +1,37 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { CalendarDays, CreditCard, GitBranch, Trophy, UsersRound } from "lucide-react";
 import { Avatar } from "../../components/common/Avatar";
 import { Badge } from "../../components/common/Badge";
 import { Card } from "../../components/common/Card";
 import { EmptyState } from "../../components/common/EmptyState";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
 import { Tabs } from "../../components/common/Tabs";
 import { BracketMatch } from "../../components/brackets/BracketMatch";
-import { mockCategories } from "../../mocks/mockCategories";
-import { playerService } from "../../services/playerService";
+import { useAsyncData } from "../../hooks/useAsyncData";
 import { matchService } from "../../services/matchService";
 import { tournamentService } from "../../services/tournamentService";
 import { formatCurrency, formatDate } from "../../utils/formatters";
 
 export function PlayerTournamentDetailPage() {
   const { id } = useParams();
-  const tournament = tournamentService.getTournamentById(id);
   const [tab, setTab] = useState("summary");
-  const matches = matchService.getMatchesByTournament(id);
-  const bracket = tournamentService.getTournamentBracket(id);
-  const categories = useMemo(() => mockCategories.filter((category) => tournament?.categories.includes(category.id)), [tournament]);
+  const { data, loading, error, reload } = useAsyncData(async () => {
+    const [tournament, matches, bracket, categories, participants] = await Promise.all([
+      tournamentService.getTournamentById(id),
+      matchService.getMatchesByTournament(id),
+      tournamentService.getTournamentBracket(id),
+      tournamentService.getTournamentCategories(id),
+      tournamentService.getTournamentParticipants(id),
+    ]);
+    return { tournament, matches, bracket, categories, participants };
+  }, [id]);
+
+  if (loading) return <LoadingState message="Cargando torneo..." />;
+  if (error) return <ErrorState title="No pudimos cargar el torneo." onRetry={reload} />;
+
+  const { tournament, matches, bracket, categories, participants } = data;
 
   if (!tournament) {
     return <EmptyState title="Torneo no encontrado" description="La competencia solicitada no existe en los datos mock." />;
@@ -32,8 +44,6 @@ export function PlayerTournamentDetailPage() {
     ...(tournament.type === "Eliminacion Directa" || tournament.type === "Preliminar" ? [{ id: "bracket", label: "Cuadro" }] : []),
     ...(tournament.type === "Zonas" ? [{ id: "standings", label: "Zonas" }] : []),
   ];
-  const participants = (tournament.participants || []).map((playerId) => playerService.getPlayerById(playerId)).filter(Boolean);
-
   return (
     <div className="page-stack">
       <header className="detail-hero tournament-detail-hero">

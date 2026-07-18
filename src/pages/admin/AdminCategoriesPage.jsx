@@ -2,12 +2,26 @@ import { Edit3, Plus, ToggleLeft } from "lucide-react";
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
-import { mockCategories } from "../../mocks/mockCategories";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
+import { useAsyncData } from "../../hooks/useAsyncData";
+import { categoryService } from "../../services/categoryService";
 import { playerService } from "../../services/playerService";
 
 export function AdminCategoriesPage() {
   const branches = ["Masculino", "Femenino"];
-  const players = playerService.getPlayers();
+  const { data, loading, error, reload } = useAsyncData(async () => {
+    const [categories, players] = await Promise.all([
+      categoryService.getCategories(),
+      playerService.getPlayers(),
+    ]);
+    return { categories, players };
+  }, []);
+
+  if (loading) return <LoadingState message="Cargando categorias..." />;
+  if (error) return <ErrorState title="No pudimos cargar categorias." onRetry={reload} />;
+
+  const { categories, players } = data;
 
   return (
     <div className="page-stack">
@@ -30,7 +44,7 @@ export function AdminCategoriesPage() {
           <Card key={branch}>
             <h2>{branch}</h2>
             <div className="category-list">
-              {mockCategories.filter((category) => category.branch === branch).sort((a, b) => a.level - b.level).map((category) => {
+              {categories.filter((category) => category.branch === branch).sort((a, b) => a.level - b.level).map((category) => {
                 const count = players.filter((player) => player.categoryId === category.id).length;
                 return (
                   <div key={category.id} className="category-line">

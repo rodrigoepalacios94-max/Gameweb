@@ -1729,6 +1729,39 @@ textarea {
   color: var(--color-danger);
 }
 
+.loading-state--panel,
+.error-state--panel {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 120px;
+  border-radius: var(--radius-md);
+}
+
+.loading-state--panel svg {
+  color: var(--color-green);
+  animation: spin 900ms linear infinite;
+}
+
+.error-state--panel {
+  justify-content: space-between;
+}
+
+.error-state--panel > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (max-width: 759px) {
   .topbar {
     min-height: 78px;

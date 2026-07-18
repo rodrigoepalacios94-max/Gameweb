@@ -2,7 +2,10 @@ import { Bell, Clock, GitBranch, MapPinned, ScrollText, ShieldAlert, Tags, Troph
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
-import { mockSettings } from "../../mocks/mockAdmin";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
+import { useAsyncData } from "../../hooks/useAsyncData";
+import { adminService } from "../../services/adminService";
 
 const modules = [
   { title: "Categorias", icon: Tags, description: "Nombre, rama, nivel jerarquico y estado activo/inactivo.", action: "/admin/categories" },
@@ -16,6 +19,11 @@ const modules = [
 ];
 
 export function AdminSettingsPage() {
+  const { data: settings, loading, error, reload } = useAsyncData(() => adminService.getSettings(), []);
+
+  if (loading) return <LoadingState message="Cargando configuracion..." />;
+  if (error) return <ErrorState title="No pudimos cargar configuracion." onRetry={reload} />;
+
   return (
     <div className="page-stack">
       <header className="page-header page-header--wide">
@@ -41,7 +49,7 @@ export function AdminSettingsPage() {
         <Card>
           <h2>Sistemas de puntaje mock</h2>
           <div className="compact-list">
-            {mockSettings.scoringSystems.map((system) => (
+            {settings.scoringSystems.map((system) => (
               <div key={system.name} className="compact-item">
                 <strong>{system.name}</strong>
                 <span>Inscripcion {system.inscription} / Campeon {system.champion} / Subcampeon {system.runnerUp}</span>
@@ -52,10 +60,10 @@ export function AdminSettingsPage() {
         <Card>
           <h2>Disciplina y canales</h2>
           <div className="info-list">
-            <span>Limite de faltas: {mockSettings.discipline.faultLimit}</span>
-            <span>{mockSettings.discipline.limitAction}</span>
-            <span>Canchas: {mockSettings.courts.join(", ")}</span>
-            <span>Notificaciones: {mockSettings.notifications.join(", ")}</span>
+            <span>Limite de faltas: {settings.discipline.faultLimit}</span>
+            <span>{settings.discipline.limitAction}</span>
+            <span>Canchas: {settings.courts.join(", ")}</span>
+            <span>Notificaciones: {settings.notifications.join(", ")}</span>
           </div>
           <Badge tone="info">Preparado para crecer por club/profesor</Badge>
         </Card>

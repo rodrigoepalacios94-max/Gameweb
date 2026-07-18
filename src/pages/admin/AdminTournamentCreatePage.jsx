@@ -3,9 +3,12 @@ import { CalendarDays, CheckCircle2, GitBranch, MapPinned, Trophy, UsersRound } 
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
 import { Tabs } from "../../components/common/Tabs";
-import { mockSettings } from "../../mocks/mockAdmin";
-import { mockCategories } from "../../mocks/mockCategories";
+import { useAsyncData } from "../../hooks/useAsyncData";
+import { adminService } from "../../services/adminService";
+import { categoryService } from "../../services/categoryService";
 
 const steps = [
   { id: "general", label: "General" },
@@ -19,6 +22,18 @@ const steps = [
 export function AdminTournamentCreatePage() {
   const [activeStep, setActiveStep] = useState("general");
   const [selectedFormat, setSelectedFormat] = useState("Preliminar");
+  const { data, loading, error, reload } = useAsyncData(async () => {
+    const [settings, categories] = await Promise.all([
+      adminService.getSettings(),
+      categoryService.getCategories(),
+    ]);
+    return { settings, categories };
+  }, []);
+
+  if (loading) return <LoadingState message="Cargando asistente..." />;
+  if (error) return <ErrorState title="No pudimos cargar el asistente." onRetry={reload} />;
+
+  const { settings, categories } = data;
 
   return (
     <div className="page-stack">
@@ -51,7 +66,7 @@ export function AdminTournamentCreatePage() {
               <span>Las categorias son configurables por nivel jerarquico. El nivel se usa para validar si un jugador puede jugar su categoria o superiores.</span>
             </div>
             <div className="badge-cloud">
-              {mockCategories.map((category) => (
+              {categories.map((category) => (
                 <label key={category.id} className="check-pill">
                   <input type="checkbox" defaultChecked={category.status === "Activa" && category.level <= 5} />
                   <strong>{category.name} {category.branch}</strong>
@@ -64,7 +79,7 @@ export function AdminTournamentCreatePage() {
 
         {activeStep === "format" ? (
           <div className="option-grid">
-            {mockSettings.tournamentTypes.map((format) => (
+            {settings.tournamentTypes.map((format) => (
               <button key={format} className={selectedFormat === format ? "category-option is-selected" : "category-option"} type="button" onClick={() => setSelectedFormat(format)}>
                 <GitBranch size={20} />
                 <strong>{format}</strong>
@@ -82,7 +97,7 @@ export function AdminTournamentCreatePage() {
 
         {activeStep === "scoring" ? (
           <div className="admin-table">
-            {mockSettings.scoringSystems.map((system) => (
+            {settings.scoringSystems.map((system) => (
               <div key={system.name} className="admin-table-row admin-table-row--scoring">
                 <Trophy size={20} />
                 <strong>{system.name}</strong>
@@ -100,8 +115,8 @@ export function AdminTournamentCreatePage() {
             <label>Fecha de inicio<input type="date" defaultValue="2026-08-08" /></label>
             <label>Fecha prevista de semifinales<input type="date" defaultValue="2026-08-15" /></label>
             <label>Dia de finales<input type="date" defaultValue="2026-08-16" /></label>
-            <label>Canchas<textarea defaultValue={mockSettings.courts.join(", ")} /></label>
-            <label>Turnos disponibles<textarea defaultValue={mockSettings.timeSlots.join("\n")} /></label>
+            <label>Canchas<textarea defaultValue={settings.courts.join(", ")} /></label>
+            <label>Turnos disponibles<textarea defaultValue={settings.timeSlots.join("\n")} /></label>
             <div className="info-band">
               <strong>Programacion editable</strong>
               <span>GAME distribuye segun disponibilidad, canchas, descanso, fases y finales; el profesor puede modificar fechas, horarios y canchas.</span>

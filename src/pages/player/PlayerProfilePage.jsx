@@ -1,34 +1,51 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Camera, ChevronDown, Pencil, Send } from "lucide-react";
 import { Avatar } from "../../components/common/Avatar";
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
 import { Select } from "../../components/common/Select";
 import { useAuth } from "../../context/AuthContext";
-import { mockCategories } from "../../mocks/mockCategories";
+import { useAsyncData } from "../../hooks/useAsyncData";
+import { categoryService } from "../../services/categoryService";
 import { matchService } from "../../services/matchService";
+import { playerService } from "../../services/playerService";
 import { tournamentService } from "../../services/tournamentService";
 
 export function PlayerProfilePage() {
   const { user } = useAuth();
   const [descentCategoryId, setDescentCategoryId] = useState("cat-m5");
   const [requestStatus, setRequestStatus] = useState("Sin solicitud enviada");
-  const matches = matchService.getPlayerMatches();
-  const tournaments = tournamentService.getTournaments().filter((tournament) => tournament.participants?.includes(user.id));
+  const { data, loading, error, reload } = useAsyncData(async () => {
+    const [matches, tournaments, categoryRules] = await Promise.all([
+      matchService.getPlayerMatches(user.id),
+      tournamentService.getTournaments(),
+      categoryService.getCategoryRulesForPlayer(user.id),
+    ]);
+    return {
+      matches,
+      tournaments: tournaments.filter((tournament) => tournament.participants?.includes(user.id)),
+      lowerCategories: categoryRules.lowerCategories,
+    };
+  }, [user.id]);
   const winRate = user.stats.played ? Math.round((user.stats.wins / user.stats.played) * 100) : 0;
-  const lowerCategories = useMemo(
-    () =>
-      mockCategories
-        .filter((category) => category.status === "Activa" && category.branch === user.gender && category.level > 4)
-        .map((category) => ({ value: category.id, label: `${category.name} ${category.branch}` })),
-    [user.gender],
-  );
 
-  function requestDescent() {
-    const category = mockCategories.find((item) => item.id === descentCategoryId);
-    setRequestStatus(`Solicitud pendiente para ${category?.name || "categoria seleccionada"}`);
+  useEffect(() => {
+    if (data?.lowerCategories?.[0]) setDescentCategoryId(data.lowerCategories[0].id);
+  }, [data]);
+
+  async function requestDescent() {
+    const request = await playerService.requestCategoryDowngrade(user.id, descentCategoryId);
+    setRequestStatus(`Solicitud pendiente para ${request?.requestedCategoryName || "categoria seleccionada"}`);
   }
+
+  if (loading) return <LoadingState message="Cargando perfil..." />;
+  if (error) return <ErrorState title="No pudimos cargar tu perfil." onRetry={reload} />;
+
+  const { matches, tournaments, lowerCategories } = data;
+  const lowerCategoryOptions = lowerCategories.map((category) => ({ value: category.id, label: `${category.name} ${category.branch}` }));
 
   return (
     <div className="page-stack">
@@ -100,7 +117,7 @@ export function PlayerProfilePage() {
             <h2>Solicitud de descenso</h2>
             <p>El jugador no puede inscribirse directamente en una categoria inferior. La solicitud queda pendiente para revision del profesor.</p>
           </div>
-          <Select label="Categoria inferior" value={descentCategoryId} onChange={setDescentCategoryId} options={lowerCategories} />
+          <Select label="Categoria inferior" value={descentCategoryId} onChange={setDescentCategoryId} options={lowerCategoryOptions} />
           <Button variant="outline-green" icon={Send} onClick={requestDescent}>Solicitar descenso</Button>
           <Badge tone={requestStatus.includes("pendiente") ? "warning" : "neutral"}>{requestStatus}</Badge>
         </Card>

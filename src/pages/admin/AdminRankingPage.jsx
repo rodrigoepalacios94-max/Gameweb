@@ -4,14 +4,28 @@ import { Avatar } from "../../components/common/Avatar";
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
 import { Select } from "../../components/common/Select";
-import { mockCategories } from "../../mocks/mockCategories";
+import { useAsyncData } from "../../hooks/useAsyncData";
+import { categoryService } from "../../services/categoryService";
 import { rankingService } from "../../services/rankingService";
 
 export function AdminRankingPage() {
   const [categoryId, setCategoryId] = useState("cat-m4");
-  const entries = rankingService.getRankingByCategory(categoryId);
-  const movements = rankingService.getMovementsByPlayer("player-1");
+  const { data, loading, error, reload } = useAsyncData(async () => {
+    const [categories, entries, movements] = await Promise.all([
+      categoryService.getCategories(),
+      rankingService.getRankingByCategory(categoryId),
+      rankingService.getPlayerRankingHistory("player-1"),
+    ]);
+    return { categories, entries, movements };
+  }, [categoryId]);
+
+  if (loading) return <LoadingState message="Cargando ranking admin..." />;
+  if (error) return <ErrorState title="No pudimos cargar ranking admin." onRetry={reload} />;
+
+  const { categories, entries, movements } = data;
 
   return (
     <div className="page-stack">
@@ -26,7 +40,7 @@ export function AdminRankingPage() {
 
       <div className="detail-grid">
         <Card>
-          <Select label="Categoria" value={categoryId} onChange={setCategoryId} options={mockCategories.map((category) => ({ value: category.id, label: `${category.name} ${category.branch}` }))} />
+          <Select label="Categoria" value={categoryId} onChange={setCategoryId} options={categories.map((category) => ({ value: category.id, label: `${category.name} ${category.branch}` }))} />
           <div className="admin-table ranking-admin-table">
             {entries.map((entry) => (
               <div key={entry.playerId} className="admin-table-row admin-table-row--ranking">

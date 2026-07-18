@@ -4,8 +4,11 @@ import { CalendarDays, GitBranch, ListFilter, Trophy } from "lucide-react";
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
 import { EmptyState } from "../../components/common/EmptyState";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
 import { Tabs } from "../../components/common/Tabs";
 import { TournamentCard } from "../../components/tournaments/TournamentCard";
+import { useAsyncData } from "../../hooks/useAsyncData";
 import { tournamentService } from "../../services/tournamentService";
 
 const filters = [
@@ -18,10 +21,10 @@ const filters = [
 
 export function PlayerTournamentsPage() {
   const [filter, setFilter] = useState("all");
-  const tournaments = tournamentService.getTournaments();
+  const { data: tournaments, loading, error, reload } = useAsyncData(() => tournamentService.getTournaments(), []);
   const filteredTournaments = useMemo(
     () =>
-      tournaments.filter((tournament) => {
+      (tournaments || []).filter((tournament) => {
         if (filter === "open") return tournament.status === "Inscripciones abiertas";
         if (filter === "mine") return tournament.registrationStatus === "Inscripto" || tournament.registrationStatus === "Finalizado";
         if (filter === "active") return tournament.status === "En juego";
@@ -30,6 +33,9 @@ export function PlayerTournamentsPage() {
       }),
     [filter, tournaments],
   );
+
+  if (loading) return <LoadingState message="Cargando torneos..." />;
+  if (error) return <ErrorState title="No pudimos cargar los torneos." onRetry={reload} />;
 
   return (
     <div className="page-stack">

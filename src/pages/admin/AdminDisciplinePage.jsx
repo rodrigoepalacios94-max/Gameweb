@@ -3,21 +3,38 @@ import { Check, RotateCcw, ShieldAlert, X } from "lucide-react";
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
 import { Modal } from "../../components/common/Modal";
-import { mockSettings } from "../../mocks/mockAdmin";
-import { mockDiscipline } from "../../mocks/mockDiscipline";
+import { useAsyncData } from "../../hooks/useAsyncData";
+import { adminService } from "../../services/adminService";
+import { disciplineService } from "../../services/disciplineService";
 import { playerService } from "../../services/playerService";
 import { formatDate } from "../../utils/formatters";
 
 export function AdminDisciplinePage() {
-  const [claims, setClaims] = useState(mockDiscipline.claims);
   const [selectedClaim, setSelectedClaim] = useState(null);
-  const players = playerService.getPlayers();
+  const { data, loading, error, reload } = useAsyncData(async () => {
+    const [claims, faults, players, settings] = await Promise.all([
+      disciplineService.getClaims(),
+      disciplineService.getFaults(),
+      playerService.getPlayers(),
+      adminService.getSettings(),
+    ]);
+    return { claims, faults, players, settings };
+  }, []);
+
+  if (loading) return <LoadingState message="Cargando disciplina..." />;
+  if (error) return <ErrorState title="No pudimos cargar disciplina." onRetry={reload} />;
+
+  const { claims, faults, players, settings } = data;
   const watchedPlayers = players.filter((player) => player.discipline.faults > 0);
 
-  function updateClaim(status) {
-    setClaims((current) => current.map((claim) => (claim.id === selectedClaim.id ? { ...claim, status } : claim)));
+  async function updateClaim(status) {
+    if (status === "Confirmado") await disciplineService.confirmClaim(selectedClaim.id);
+    if (status === "Rechazado") await disciplineService.rejectClaim(selectedClaim.id);
     setSelectedClaim(null);
+    reload();
   }
 
   return (
@@ -30,7 +47,7 @@ export function AdminDisciplinePage() {
 
       <div className="info-band">
         <strong>Limite disciplinario</strong>
-        <span>{mockSettings.discipline.faultLimit} faltas confirmadas generan expulsion del torneo actual, bloqueo de nuevas inscripciones y rehabilitacion manual.</span>
+        <span>{settings.discipline.faultLimit} faltas confirmadas generan expulsion del torneo actual, bloqueo de nuevas inscripciones y rehabilitacion manual.</span>
       </div>
 
       <div className="detail-grid">
@@ -56,7 +73,21 @@ export function AdminDisciplinePage() {
                 <strong>{player.fullName}</strong>
                 <span>{player.discipline.faults}/{player.discipline.limit}</span>
                 <Badge tone={player.discipline.faults >= 3 ? "danger" : "warning"}>{player.discipline.status}</Badge>
-                {player.discipline.faults >= player.discipline.limit ? <Button variant="ghost" size="sm" icon={RotateCcw}>Desbloquear jugador</Button> : <span className="muted">Seguimiento</span>}
+                {player.discipline.faults >= player.discipline.limit ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={RotateCcw}
+                    onClick={async () => {
+                      await disciplineService.unblockPlayer(player.id);
+                      reload();
+                    }}
+                  >
+                    Desbloquear jugador
+                  </Button>
+                ) : (
+                  <span className="muted">Seguimiento</span>
+                )}
               </div>
             ))}
           </div>
@@ -66,8 +97,8 @@ export function AdminDisciplinePage() {
       <Card>
         <h2>Faltas confirmadas</h2>
         <div className="admin-table">
-          {mockDiscipline.faults.map((fault) => {
-            const player = playerService.getPlayerById(fault.playerId);
+          {faults.map((fault) => {
+            const player = players.find((item) => item.id === fault.playerId);
             return (
               <div key={fault.id} className="admin-table-row admin-table-row--faults">
                 <ShieldAlert size={18} />

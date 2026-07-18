@@ -4,11 +4,14 @@ import { CheckCircle2, CreditCard, ShieldQuestion } from "lucide-react";
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
 import { Tabs } from "../../components/common/Tabs";
 import { useAuth } from "../../context/AuthContext";
-import { mockCategories } from "../../mocks/mockCategories";
+import { useAsyncData } from "../../hooks/useAsyncData";
+import { categoryService } from "../../services/categoryService";
+import { playerService } from "../../services/playerService";
 import { tournamentService } from "../../services/tournamentService";
-import { canPlayerRegisterInCategory, isLowerCategory } from "../../utils/categoryRules";
 import { formatCurrency } from "../../utils/formatters";
 
 const steps = [
@@ -24,19 +27,28 @@ const slots = ["Sabado 9:00", "Sabado 12:00", "Sabado 16:00", "Domingo 9:00", "D
 export function PlayerTournamentRegistrationPage() {
   const { id } = useParams();
   const { user } = useAuth();
-  const tournament = tournamentService.getTournamentById(id);
   const [stepIndex, setStepIndex] = useState(0);
   const [selectedCategoryId, setSelectedCategoryId] = useState(user.categoryId);
   const [blockedSlots, setBlockedSlots] = useState([]);
   const [descentRequested, setDescentRequested] = useState(false);
+  const { data, loading, error, reload } = useAsyncData(async () => {
+    const [tournament, tournamentCategories, categoryRules] = await Promise.all([
+      tournamentService.getTournamentById(id),
+      tournamentService.getTournamentCategories(id),
+      categoryService.getCategoryRulesForPlayer(user.id),
+    ]);
+    return { tournament, tournamentCategories, categoryRules };
+  }, [id, user.id]);
 
-  const tournamentCategories = useMemo(
-    () => mockCategories.filter((category) => tournament?.categories.includes(category.id)),
-    [tournament],
+  const selectedCategory = useMemo(
+    () => data?.tournamentCategories.find((category) => category.id === selectedCategoryId),
+    [data, selectedCategoryId],
   );
-  const playerCategory = mockCategories.find((category) => category.id === user.categoryId);
-  const selectedCategory = mockCategories.find((category) => category.id === selectedCategoryId);
 
+  if (loading) return <LoadingState message="Cargando inscripcion..." />;
+  if (error) return <ErrorState title="No pudimos cargar la inscripcion." onRetry={reload} />;
+
+  const { tournament, tournamentCategories, categoryRules } = data;
   if (!tournament) return <Card>Torneo no encontrado.</Card>;
 
   function toggleSlot(slot) {
@@ -49,6 +61,13 @@ export function PlayerTournamentRegistrationPage() {
 
   function previous() {
     setStepIndex((current) => Math.max(current - 1, 0));
+  }
+
+  async function requestDescent() {
+    const lowerCategory = categoryRules.lowerCategories[0];
+    if (!lowerCategory) return;
+    await playerService.requestCategoryDowngrade(user.id, lowerCategory.id);
+    setDescentRequested(true);
   }
 
   return (
@@ -65,8 +84,8 @@ export function PlayerTournamentRegistrationPage() {
           <h2>Seleccionar categoria</h2>
           <div className="category-options">
             {tournamentCategories.map((category) => {
-              const enabled = canPlayerRegisterInCategory(playerCategory, category);
-              const lower = isLowerCategory(playerCategory, category);
+              const enabled = categoryService.canPlayerRegisterInCategory(categoryRules.currentCategory, category);
+              const lower = categoryService.isLowerCategory(categoryRules.currentCategory, category);
               return (
                 <button
                   key={category.id}
@@ -83,7 +102,7 @@ export function PlayerTournamentRegistrationPage() {
               );
             })}
           </div>
-          <Button variant="secondary" icon={ShieldQuestion} onClick={() => setDescentRequested(true)}>
+          <Button variant="secondary" icon={ShieldQuestion} onClick={requestDescent}>
             Solicitar descenso de categoria
           </Button>
           {descentRequested ? <p className="mock-note">Solicitud mock creada: queda pendiente de aprobacion del profesor.</p> : null}

@@ -1,5 +1,5 @@
 export const paymentService = {
-  createMockMercadoPagoCheckout(registration) {
+  async createMockMercadoPagoCheckout(registration) {
     return {
       id: `mock-payment-${registration.id}`,
       provider: "Mercado Pago MOCK",

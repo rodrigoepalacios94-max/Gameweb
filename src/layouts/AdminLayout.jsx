@@ -15,6 +15,7 @@ import {
 import { Avatar } from "../components/common/Avatar";
 import { RoleSwitcher } from "../components/layout/RoleSwitcher";
 import { useAuth } from "../context/AuthContext";
+import { useAsyncData } from "../hooks/useAsyncData";
 import { notificationService } from "../services/notificationService";
 import logoGame from "../assets/logo-game.png";
 
@@ -33,7 +34,8 @@ const adminNav = [
 
 export function AdminLayout() {
   const { user } = useAuth();
-  const unreadCount = notificationService.getNotificationsByRole("admin").filter((item) => !item.read).length;
+  const { data: notifications = [] } = useAsyncData(() => notificationService.getNotificationsByRole("admin"), []);
+  const unreadCount = (notifications || []).filter((item) => !item.read).length;
 
   return (
     <div className="admin-shell">

@@ -1,9 +1,12 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { CheckCheck } from "lucide-react";
 import { Button } from "../../components/common/Button";
 import { EmptyState } from "../../components/common/EmptyState";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
 import { Tabs } from "../../components/common/Tabs";
 import { NotificationItem } from "../../components/player/NotificationItem";
+import { useAsyncData } from "../../hooks/useAsyncData";
 import { notificationService } from "../../services/notificationService";
 
 const filters = [
@@ -15,23 +18,27 @@ const filters = [
 ];
 
 export function AdminNotificationsPage() {
-  const baseNotifications = useMemo(() => notificationService.getNotificationsByRole("admin"), []);
-  const [notifications, setNotifications] = useState(baseNotifications);
+  const { data: notifications, loading, error, reload } = useAsyncData(() => notificationService.getNotificationsByRole("admin"), []);
   const [tab, setTab] = useState("all");
-  const unreadCount = notifications.filter((notification) => !notification.read).length;
-  const filtered = notifications.filter((notification) => {
+  const unreadCount = (notifications || []).filter((notification) => !notification.read).length;
+  const filtered = (notifications || []).filter((notification) => {
     if (tab === "all") return true;
     if (tab === "unread") return !notification.read;
     return notification.type === tab;
   });
 
-  function markRead(id) {
-    setNotifications((current) => current.map((item) => (item.id === id ? { ...item, read: true } : item)));
+  async function markRead(id) {
+    await notificationService.markAsRead(id);
+    reload();
   }
 
-  function markAllRead() {
-    setNotifications((current) => current.map((item) => ({ ...item, read: true })));
+  async function markAllRead() {
+    await notificationService.markAllAsRead("admin");
+    reload();
   }
+
+  if (loading) return <LoadingState message="Cargando avisos admin..." />;
+  if (error) return <ErrorState title="No pudimos cargar avisos admin." onRetry={reload} />;
 
   return (
     <div className="page-stack">

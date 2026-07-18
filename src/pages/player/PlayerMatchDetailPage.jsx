@@ -4,13 +4,19 @@ import { Avatar } from "../../components/common/Avatar";
 import { Badge } from "../../components/common/Badge";
 import { Card } from "../../components/common/Card";
 import { EmptyState } from "../../components/common/EmptyState";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
 import { MatchScore } from "../../components/player/MatchScore";
+import { useAsyncData } from "../../hooks/useAsyncData";
 import { matchService } from "../../services/matchService";
 import { formatDate } from "../../utils/formatters";
 
 export function PlayerMatchDetailPage() {
   const { id } = useParams();
-  const match = matchService.getMatchById(id);
+  const { data: match, loading, error, reload } = useAsyncData(() => matchService.getMatchById(id), [id]);
+
+  if (loading) return <LoadingState message="Cargando partido..." />;
+  if (error) return <ErrorState title="No pudimos cargar el partido." onRetry={reload} />;
 
   if (!match) {
     return <EmptyState title="Partido no encontrado" description="El partido solicitado no existe en los datos mock." />;

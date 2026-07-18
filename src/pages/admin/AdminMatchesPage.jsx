@@ -3,7 +3,10 @@ import { Link } from "react-router-dom";
 import { Eye } from "lucide-react";
 import { Badge } from "../../components/common/Badge";
 import { Card } from "../../components/common/Card";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
 import { Select } from "../../components/common/Select";
+import { useAsyncData } from "../../hooks/useAsyncData";
 import { matchService } from "../../services/matchService";
 import { tournamentService } from "../../services/tournamentService";
 import { formatDate } from "../../utils/formatters";
@@ -14,8 +17,15 @@ export function AdminMatchesPage() {
   const [state, setState] = useState("Todos");
   const [tournamentId, setTournamentId] = useState("Todos");
   const [category, setCategory] = useState("Todos");
-  const matches = matchService.getMatches();
-  const tournaments = tournamentService.getTournaments();
+  const { data, loading, error, reload } = useAsyncData(async () => {
+    const [matches, tournaments] = await Promise.all([
+      matchService.getMatches(),
+      tournamentService.getTournaments(),
+    ]);
+    return { matches, tournaments };
+  }, []);
+  const matches = data?.matches || [];
+  const tournaments = data?.tournaments || [];
   const categories = Array.from(new Set(matches.map((match) => match.category)));
   const filtered = useMemo(
     () =>
@@ -27,6 +37,9 @@ export function AdminMatchesPage() {
       ),
     [matches, state, tournamentId, category],
   );
+
+  if (loading) return <LoadingState message="Cargando partidos admin..." />;
+  if (error) return <ErrorState title="No pudimos cargar partidos admin." onRetry={reload} />;
 
   return (
     <div className="page-stack">

@@ -1,18 +1,33 @@
-import { useState } from "react";
 import { Check, X } from "lucide-react";
 import { Avatar } from "../../components/common/Avatar";
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
-import { mockDescentRequests } from "../../mocks/mockAdmin";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
+import { useAsyncData } from "../../hooks/useAsyncData";
+import { categoryRequestService } from "../../services/categoryRequestService";
 import { playerService } from "../../services/playerService";
 import { formatDate } from "../../utils/formatters";
 
 export function AdminRequestsPage() {
-  const [requests, setRequests] = useState(mockDescentRequests);
+  const { data, loading, error, reload } = useAsyncData(async () => {
+    const [requests, players] = await Promise.all([
+      categoryRequestService.getCategoryChangeRequests(),
+      playerService.getPlayers(),
+    ]);
+    return { requests, players };
+  }, []);
 
-  function updateStatus(id, status) {
-    setRequests((current) => current.map((request) => (request.id === id ? { ...request, status } : request)));
+  if (loading) return <LoadingState message="Cargando solicitudes..." />;
+  if (error) return <ErrorState title="No pudimos cargar solicitudes." onRetry={reload} />;
+
+  const { requests, players } = data;
+
+  async function updateStatus(id, status) {
+    if (status === "Aprobada") await categoryRequestService.approveRequest(id);
+    if (status === "Rechazada") await categoryRequestService.rejectRequest(id);
+    reload();
   }
 
   return (
@@ -26,7 +41,7 @@ export function AdminRequestsPage() {
       <Card>
         <div className="admin-table">
           {requests.map((request) => {
-            const player = playerService.getPlayerById(request.playerId);
+            const player = players.find((item) => item.id === request.playerId);
             return (
               <div key={request.id} className="admin-table-row admin-table-row--requests">
                 <Avatar src={player?.avatar} name={player?.fullName} size="sm" />

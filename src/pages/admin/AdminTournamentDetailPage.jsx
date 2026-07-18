@@ -6,11 +6,14 @@ import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
 import { EmptyState } from "../../components/common/EmptyState";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
 import { Tabs } from "../../components/common/Tabs";
 import { BracketMatch } from "../../components/brackets/BracketMatch";
-import { mockRegistrations, mockSchedule } from "../../mocks/mockAdmin";
-import { mockCategories } from "../../mocks/mockCategories";
-import { mockDiscipline } from "../../mocks/mockDiscipline";
+import { useAsyncData } from "../../hooks/useAsyncData";
+import { adminService } from "../../services/adminService";
+import { disciplineService } from "../../services/disciplineService";
+import { enrollmentService } from "../../services/enrollmentService";
 import { matchService } from "../../services/matchService";
 import { playerService } from "../../services/playerService";
 import { tournamentService } from "../../services/tournamentService";
@@ -19,18 +22,30 @@ import { formatCurrency, formatDate } from "../../utils/formatters";
 export function AdminTournamentDetailPage() {
   const { id } = useParams();
   const [tab, setTab] = useState("summary");
-  const tournament = tournamentService.getTournamentById(id);
+  const { data, loading, error, reload } = useAsyncData(async () => {
+    const [tournament, matches, bracket, registrations, schedule, participants, categories, claims, players] = await Promise.all([
+      tournamentService.getTournamentById(id),
+      matchService.getMatchesByTournament(id),
+      tournamentService.getTournamentBracket(id),
+      enrollmentService.getEnrollmentsByTournament(id),
+      adminService.getScheduleByTournament(id),
+      tournamentService.getTournamentParticipants(id),
+      tournamentService.getTournamentCategories(id),
+      disciplineService.getClaims(),
+      playerService.getPlayers(),
+    ]);
+    return { tournament, matches, bracket, registrations, schedule, participants, categories, claims, players };
+  }, [id]);
+
+  if (loading) return <LoadingState message="Cargando detalle de torneo..." />;
+  if (error) return <ErrorState title="No pudimos cargar el detalle de torneo." onRetry={reload} />;
+
+  const { tournament, matches, bracket, registrations, schedule, participants, categories, claims, players } = data;
 
   if (!tournament) {
     return <EmptyState title="Torneo no encontrado" description="No existe un torneo admin con ese identificador mock." />;
   }
 
-  const matches = matchService.getMatchesByTournament(id);
-  const bracket = tournamentService.getTournamentBracket(id);
-  const registrations = mockRegistrations.filter((registration) => registration.tournamentId === id);
-  const schedule = mockSchedule.filter((slot) => slot.tournamentId === id);
-  const participants = (tournament.participants || []).map((playerId) => playerService.getPlayerById(playerId)).filter(Boolean);
-  const categories = mockCategories.filter((category) => tournament.categories.includes(category.id));
   const tabs = [
     { id: "summary", label: "Resumen" },
     { id: "registrations", label: "Inscripciones" },
@@ -100,7 +115,7 @@ export function AdminTournamentDetailPage() {
           {registrations.length ? (
             <div className="admin-table">
               {registrations.map((registration) => {
-                const player = playerService.getPlayerById(registration.playerId);
+                const player = players.find((item) => item.id === registration.playerId);
                 return (
                   <div key={registration.id} className="admin-table-row admin-table-row--registrations">
                     <Avatar src={player?.avatar} name={player?.fullName} size="sm" />
@@ -228,7 +243,7 @@ export function AdminTournamentDetailPage() {
             <ShieldAlert size={18} />
           </div>
           <div className="compact-list">
-            {mockDiscipline.claims.map((claim) => (
+            {claims.map((claim) => (
               <Link key={claim.id} className="claim-row" to="/admin/discipline">
                 <strong>{claim.reportedPlayer}</strong>
                 <span>{claim.match}</span>

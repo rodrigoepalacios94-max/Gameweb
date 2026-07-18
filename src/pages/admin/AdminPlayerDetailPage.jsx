@@ -5,8 +5,11 @@ import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
 import { EmptyState } from "../../components/common/EmptyState";
-import { mockDescentRequests } from "../../mocks/mockAdmin";
-import { mockDiscipline } from "../../mocks/mockDiscipline";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
+import { useAsyncData } from "../../hooks/useAsyncData";
+import { categoryRequestService } from "../../services/categoryRequestService";
+import { disciplineService } from "../../services/disciplineService";
 import { matchService } from "../../services/matchService";
 import { playerService } from "../../services/playerService";
 import { tournamentService } from "../../services/tournamentService";
@@ -14,16 +17,31 @@ import { formatDate } from "../../utils/formatters";
 
 export function AdminPlayerDetailPage() {
   const { id } = useParams();
-  const player = playerService.getPlayerById(id);
+  const { data, loading, error, reload } = useAsyncData(async () => {
+    const [player, matches, tournaments, requests, discipline] = await Promise.all([
+      playerService.getPlayerById(id),
+      matchService.getMatchesByPlayer(id),
+      tournamentService.getTournaments(),
+      categoryRequestService.getRequestsByPlayer(id),
+      disciplineService.getPlayerDiscipline(id),
+    ]);
+    return {
+      player,
+      matches,
+      tournaments: tournaments.filter((tournament) => tournament.participants?.includes(id)),
+      requests,
+      faults: discipline.faults,
+    };
+  }, [id]);
+
+  if (loading) return <LoadingState message="Cargando jugador..." />;
+  if (error) return <ErrorState title="No pudimos cargar el jugador." onRetry={reload} />;
+
+  const { player, matches, tournaments, requests, faults } = data;
 
   if (!player) {
     return <EmptyState title="Jugador no encontrado" description="No existe un jugador mock con ese identificador." />;
   }
-
-  const matches = matchService.getMatches().filter((match) => match.playerAId === id || match.playerBId === id);
-  const tournaments = tournamentService.getTournaments().filter((tournament) => tournament.participants?.includes(id));
-  const requests = mockDescentRequests.filter((request) => request.playerId === id);
-  const faults = mockDiscipline.faults.filter((fault) => fault.playerId === id);
 
   return (
     <div className="page-stack">

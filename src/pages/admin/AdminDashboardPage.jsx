@@ -3,25 +3,32 @@ import { AlertTriangle, CalendarCheck, MessageSquareWarning, Plus, ShieldAlert, 
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
 import { StatCard } from "../../components/common/StatCard";
-import { mockDescentRequests, mockRegistrations } from "../../mocks/mockAdmin";
-import { mockDiscipline } from "../../mocks/mockDiscipline";
-import { matchService } from "../../services/matchService";
-import { notificationService } from "../../services/notificationService";
-import { playerService } from "../../services/playerService";
-import { tournamentService } from "../../services/tournamentService";
+import { useAsyncData } from "../../hooks/useAsyncData";
+import { adminService } from "../../services/adminService";
 import { formatDate } from "../../utils/formatters";
 
 export function AdminDashboardPage() {
-  const tournaments = tournamentService.getTournaments();
-  const players = playerService.getPlayers();
-  const matches = matchService.getMatches();
-  const activity = notificationService.getNotificationsByRole("admin");
-  const activeTournaments = tournaments.filter((item) => item.status === "En juego");
-  const openTournaments = tournaments.filter((item) => item.status === "Inscripciones abiertas");
-  const pendingMatches = matches.filter((item) => item.status === "Pendiente" || item.status === "Programado" || item.status === "Reprogramado" || item.status === "W.O.");
-  const pendingResults = matches.filter((item) => item.status === "W.O." || item.status === "Finalizado").filter((item) => !item.auditLocked);
-  const pendingDescents = mockDescentRequests.filter((request) => request.status === "Pendiente");
+  const { data, loading, error, reload } = useAsyncData(() => adminService.getDashboardSummary(), []);
+
+  if (loading) return <LoadingState message="Cargando dashboard admin..." />;
+  if (error) return <ErrorState title="No pudimos cargar el dashboard admin." onRetry={reload} />;
+
+  const {
+    tournaments,
+    players,
+    notifications: activity,
+    activeTournaments,
+    openTournaments,
+    pendingMatches,
+    pendingResults,
+    pendingDescents,
+    pendingClaims,
+    blockedPlayers,
+    enrollments,
+  } = data;
 
   return (
     <div className="page-stack">
@@ -49,8 +56,8 @@ export function AdminDashboardPage() {
         <StatCard label="Jugadores registrados" value={players.length} icon={UsersRound} />
         <StatCard label="Partidos por atender" value={pendingMatches.length} icon={CalendarCheck} tone="orange" />
         <StatCard label="Descensos pendientes" value={pendingDescents.length} icon={MessageSquareWarning} />
-        <StatCard label="Reclamos pendientes" value={mockDiscipline.claims.filter((claim) => claim.status === "Pendiente").length} icon={ShieldAlert} tone="orange" />
-        <StatCard label="Jugadores bloqueados" value={players.filter((player) => player.status.includes("Bloqueado")).length} icon={AlertTriangle} />
+        <StatCard label="Reclamos pendientes" value={pendingClaims.length} icon={ShieldAlert} tone="orange" />
+        <StatCard label="Jugadores bloqueados" value={blockedPlayers.length} icon={AlertTriangle} />
       </div>
 
       <div className="dashboard-columns dashboard-columns--featured">
@@ -79,7 +86,7 @@ export function AdminDashboardPage() {
                 <Badge tone={match.status === "W.O." ? "warning" : "info"}>{match.status}</Badge>
               </Link>
             ))}
-            {mockDiscipline.claims.filter((claim) => claim.status === "Pendiente").map((claim) => (
+            {pendingClaims.map((claim) => (
               <Link key={claim.id} className="notice-row" to="/admin/discipline">
                 <span className="notice-icon notice-icon--disciplina"><ShieldAlert size={21} /></span>
                 <div>
@@ -112,7 +119,7 @@ export function AdminDashboardPage() {
           </div>
           <div className="info-band">
             <strong>Inscripciones mock</strong>
-            <span>{mockRegistrations.filter((registration) => registration.status === "Pendiente de pago").length} pendientes de pago y {mockRegistrations.filter((registration) => registration.status === "Confirmada").length} confirmadas.</span>
+            <span>{enrollments.filter((registration) => registration.status === "Pendiente de pago").length} pendientes de pago y {enrollments.filter((registration) => registration.status === "Confirmada").length} confirmadas.</span>
           </div>
         </Card>
       </div>

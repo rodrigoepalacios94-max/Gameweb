@@ -14,8 +14,11 @@ import { Link } from "react-router-dom";
 import { Avatar } from "../../components/common/Avatar";
 import { Badge } from "../../components/common/Badge";
 import { Card } from "../../components/common/Card";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
 import { StatCard } from "../../components/common/StatCard";
 import { useAuth } from "../../context/AuthContext";
+import { useAsyncData } from "../../hooks/useAsyncData";
 import { matchService } from "../../services/matchService";
 import { notificationService } from "../../services/notificationService";
 import { tournamentService } from "../../services/tournamentService";
@@ -23,10 +26,22 @@ import { formatCurrency, formatDate } from "../../utils/formatters";
 
 export function PlayerHomePage() {
   const { user } = useAuth();
-  const nextMatch = matchService.getPlayerMatches().find((match) => match.status !== "Finalizado");
-  const featuredTournament = tournamentService.getTournaments().find((tournament) => tournament.status === "Inscripciones abiertas");
-  const latestResults = matchService.getPlayerMatches().filter((match) => match.status === "Finalizado");
-  const importantNotifications = notificationService.getNotificationsByRole("player").filter((notification) => !notification.read).slice(0, 3);
+  const { data, loading, error, reload } = useAsyncData(async () => {
+    const [matches, tournaments, notifications] = await Promise.all([
+      matchService.getPlayerMatches(user.id),
+      tournamentService.getTournaments(),
+      notificationService.getNotificationsByRole("player"),
+    ]);
+    return { matches, tournaments, notifications };
+  }, [user.id]);
+
+  if (loading) return <LoadingState message="Cargando tu dashboard..." />;
+  if (error) return <ErrorState title="No pudimos cargar el inicio del jugador." onRetry={reload} />;
+
+  const nextMatch = data.matches.find((match) => match.status !== "Finalizado");
+  const featuredTournament = data.tournaments.find((tournament) => tournament.status === "Inscripciones abiertas");
+  const latestResults = data.matches.filter((match) => match.status === "Finalizado");
+  const importantNotifications = data.notifications.filter((notification) => !notification.read).slice(0, 3);
 
   return (
     <div className="page-stack player-dashboard">

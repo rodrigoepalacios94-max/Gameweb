@@ -1,9 +1,12 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { CheckCheck } from "lucide-react";
 import { Button } from "../../components/common/Button";
 import { EmptyState } from "../../components/common/EmptyState";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
 import { Tabs } from "../../components/common/Tabs";
 import { NotificationItem } from "../../components/player/NotificationItem";
+import { useAsyncData } from "../../hooks/useAsyncData";
 import { notificationService } from "../../services/notificationService";
 
 const filters = [
@@ -15,26 +18,30 @@ const filters = [
 ];
 
 export function PlayerNotificationsPage() {
-  const baseNotifications = useMemo(() => notificationService.getNotificationsByRole("player"), []);
-  const [notifications, setNotifications] = useState(baseNotifications);
+  const { data: notifications, loading, error, reload } = useAsyncData(() => notificationService.getNotificationsByRole("player"), []);
   const [tab, setTab] = useState("all");
 
-  const filtered = notifications.filter((item) => {
+  const filtered = (notifications || []).filter((item) => {
     if (tab === "unread") return !item.read;
     if (tab === "read") return item.read;
     if (tab === "all") return true;
     return item.type === tab;
   });
 
-  const unreadCount = notifications.filter((item) => !item.read).length;
+  const unreadCount = (notifications || []).filter((item) => !item.read).length;
 
-  function markRead(id) {
-    setNotifications((current) => current.map((item) => (item.id === id ? { ...item, read: true } : item)));
+  async function markRead(id) {
+    await notificationService.markAsRead(id);
+    reload();
   }
 
-  function markAllRead() {
-    setNotifications((current) => current.map((item) => ({ ...item, read: true })));
+  async function markAllRead() {
+    await notificationService.markAllAsRead("player");
+    reload();
   }
+
+  if (loading) return <LoadingState message="Cargando avisos..." />;
+  if (error) return <ErrorState title="No pudimos cargar tus avisos." onRetry={reload} />;
 
   return (
     <div className="page-stack">

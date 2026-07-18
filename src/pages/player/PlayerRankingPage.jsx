@@ -3,17 +3,31 @@ import { Avatar } from "../../components/common/Avatar";
 import { Badge } from "../../components/common/Badge";
 import { Card } from "../../components/common/Card";
 import { EmptyState } from "../../components/common/EmptyState";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
 import { Modal } from "../../components/common/Modal";
 import { Select } from "../../components/common/Select";
 import { useAuth } from "../../context/AuthContext";
-import { mockCategories } from "../../mocks/mockCategories";
+import { useAsyncData } from "../../hooks/useAsyncData";
+import { categoryService } from "../../services/categoryService";
 import { rankingService } from "../../services/rankingService";
 
 export function PlayerRankingPage() {
   const { user } = useAuth();
   const [categoryId, setCategoryId] = useState(user.categoryId);
   const [selectedPlayer, setSelectedPlayer] = useState(null);
-  const entries = rankingService.getRankingByCategory(categoryId);
+  const { data, loading, error, reload } = useAsyncData(async () => {
+    const [categories, entries] = await Promise.all([
+      categoryService.getCategories(),
+      rankingService.getRankingByCategory(categoryId),
+    ]);
+    return { categories, entries };
+  }, [categoryId]);
+
+  if (loading) return <LoadingState message="Cargando ranking..." />;
+  if (error) return <ErrorState title="No pudimos cargar el ranking." onRetry={reload} />;
+
+  const { categories, entries } = data;
   const podium = entries.slice(0, 3);
   const tableEntries = entries.slice(3);
 
@@ -30,7 +44,7 @@ export function PlayerRankingPage() {
           label="Categoria"
           value={categoryId}
           onChange={setCategoryId}
-          options={mockCategories.filter((category) => category.status === "Activa").map((category) => ({
+          options={categories.filter((category) => category.status === "Activa").map((category) => ({
             value: category.id,
             label: `${category.name} ${category.branch}`,
           }))}

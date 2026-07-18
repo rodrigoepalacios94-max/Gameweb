@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { AlertTriangle, CalendarDays, Edit3, MapPin, Trophy } from "lucide-react";
 import { Avatar } from "../../components/common/Avatar";
@@ -6,19 +6,31 @@ import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
 import { EmptyState } from "../../components/common/EmptyState";
+import { ErrorState } from "../../components/common/ErrorState";
+import { LoadingState } from "../../components/common/LoadingState";
 import { Modal } from "../../components/common/Modal";
 import { Select } from "../../components/common/Select";
 import { MatchScore } from "../../components/player/MatchScore";
+import { useAsyncData } from "../../hooks/useAsyncData";
 import { matchService } from "../../services/matchService";
 import { formatDate } from "../../utils/formatters";
 
 export function AdminMatchDetailPage() {
   const { id } = useParams();
-  const sourceMatch = matchService.getMatchById(id);
-  const [match, setMatch] = useState(sourceMatch);
   const [modal, setModal] = useState(null);
-  const [winnerId, setWinnerId] = useState(sourceMatch?.winnerId || sourceMatch?.playerAId || "");
-  const [walkoverPlayerId, setWalkoverPlayerId] = useState(sourceMatch?.playerBId || "");
+  const [winnerId, setWinnerId] = useState("");
+  const [walkoverPlayerId, setWalkoverPlayerId] = useState("");
+  const { data: match, loading, error, reload } = useAsyncData(() => matchService.getMatchById(id), [id]);
+
+  useEffect(() => {
+    if (match) {
+      setWinnerId(match.winnerId || match.playerAId || "");
+      setWalkoverPlayerId(match.walkoverPlayerId || match.playerBId || "");
+    }
+  }, [match]);
+
+  if (loading) return <LoadingState message="Cargando detalle de partido..." />;
+  if (error) return <ErrorState title="No pudimos cargar el partido admin." onRetry={reload} />;
 
   if (!match) {
     return <EmptyState title="Partido no encontrado" description="No existe un partido mock con ese identificador." />;
@@ -30,36 +42,22 @@ export function AdminMatchDetailPage() {
     { value: match.playerBId, label: match.playerB },
   ];
 
-  function saveResult() {
-    setMatch((current) => ({
-      ...current,
-      status: "Finalizado",
-      result: "6-4 / 7-5",
-      sets: [
-        { a: 6, b: 4 },
-        { a: 7, b: 5 },
-      ],
-      winnerId,
-    }));
+  async function saveResult() {
+    await matchService.saveResult(match.id, { winnerId });
     setModal(null);
+    reload();
   }
 
-  function saveWalkover() {
-    const resolvedWinnerId = walkoverPlayerId === match.playerAId ? match.playerBId : match.playerAId;
-    setMatch((current) => ({
-      ...current,
-      status: "W.O.",
-      result: "Ganador por W.O.",
-      sets: [],
-      winnerId: resolvedWinnerId,
-      walkoverPlayerId,
-    }));
+  async function saveWalkover() {
+    await matchService.registerWalkover(match.id, { walkoverPlayerId });
     setModal(null);
+    reload();
   }
 
-  function saveSchedule() {
-    setMatch((current) => ({ ...current, status: "Reprogramado", date: "2026-07-20", time: "12:00", court: "Cancha 3" }));
+  async function saveSchedule() {
+    await matchService.rescheduleMatch(match.id, { date: "2026-07-20", time: "12:00", court: "Cancha 3" });
     setModal(null);
+    reload();
   }
 
   return (

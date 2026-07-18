@@ -3,6 +3,7 @@ import { Bell, CalendarCheck, ChevronDown, Home, Medal, Trophy, UserRound } from
 import { Avatar } from "../components/common/Avatar";
 import { RoleSwitcher } from "../components/layout/RoleSwitcher";
 import { useAuth } from "../context/AuthContext";
+import { useAsyncData } from "../hooks/useAsyncData";
 import { notificationService } from "../services/notificationService";
 import logoGame from "../assets/logo-game.png";
 
@@ -17,7 +18,8 @@ const playerNav = [
 
 export function PlayerLayout() {
   const { user } = useAuth();
-  const unreadCount = notificationService.getNotificationsByRole("player").filter((item) => !item.read).length;
+  const { data: notifications = [] } = useAsyncData(() => notificationService.getNotificationsByRole("player"), []);
+  const unreadCount = (notifications || []).filter((item) => !item.read).length;
 
   return (
     <div className="app-shell player-shell">
