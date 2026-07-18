@@ -1,44 +1,134 @@
-import { AlertTriangle, CalendarCheck, ShieldAlert, Trophy, UserCheck, UsersRound } from "lucide-react";
+import { Link } from "react-router-dom";
+import { AlertTriangle, CalendarCheck, MessageSquareWarning, Plus, ShieldAlert, Trophy, UserCheck, UsersRound } from "lucide-react";
+import { Badge } from "../../components/common/Badge";
+import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
 import { StatCard } from "../../components/common/StatCard";
+import { mockDescentRequests, mockRegistrations } from "../../mocks/mockAdmin";
 import { mockDiscipline } from "../../mocks/mockDiscipline";
 import { matchService } from "../../services/matchService";
 import { notificationService } from "../../services/notificationService";
 import { playerService } from "../../services/playerService";
 import { tournamentService } from "../../services/tournamentService";
+import { formatDate } from "../../utils/formatters";
 
 export function AdminDashboardPage() {
   const tournaments = tournamentService.getTournaments();
   const players = playerService.getPlayers();
   const matches = matchService.getMatches();
   const activity = notificationService.getNotificationsByRole("admin");
+  const activeTournaments = tournaments.filter((item) => item.status === "En juego");
+  const openTournaments = tournaments.filter((item) => item.status === "Inscripciones abiertas");
+  const pendingMatches = matches.filter((item) => item.status === "Pendiente" || item.status === "Programado" || item.status === "Reprogramado" || item.status === "W.O.");
+  const pendingResults = matches.filter((item) => item.status === "W.O." || item.status === "Finalizado").filter((item) => !item.auditLocked);
+  const pendingDescents = mockDescentRequests.filter((request) => request.status === "Pendiente");
 
   return (
     <div className="page-stack">
-      <header className="page-header">
-        <span className="eyebrow">Administrador</span>
-        <h1>Dashboard</h1>
-        <p>Estado operativo del circuito GAME.</p>
+      <header className="admin-hero">
+        <div>
+          <span className="eyebrow">Profesor / administrador</span>
+          <h1>Centro operativo GAME</h1>
+          <p>Torneos, programacion, resultados, ranking y disciplina en un solo panel de control.</p>
+        </div>
+        <div className="hero-actions">
+          <Link className="button button--orange button--lg" to="/admin/tournaments/new">
+            <Plus size={18} />
+            <span>Crear torneo</span>
+          </Link>
+          <Link className="button button--outline-green button--lg" to="/admin/matches">
+            <CalendarCheck size={18} />
+            <span>Gestionar partidos</span>
+          </Link>
+        </div>
       </header>
+
       <div className="stats-grid admin-stats">
-        <StatCard label="Torneos activos" value={tournaments.filter((item) => item.status === "En juego").length} icon={Trophy} />
-        <StatCard label="Inscripciones abiertas" value={tournaments.filter((item) => item.status === "Inscripciones abiertas").length} icon={UserCheck} tone="orange" />
-        <StatCard label="Partidos pendientes" value={matches.filter((item) => item.status !== "Finalizado").length} icon={CalendarCheck} />
-        <StatCard label="Jugadores registrados" value={players.length} icon={UsersRound} tone="orange" />
-        <StatCard label="Descensos pendientes" value="2" icon={AlertTriangle} />
+        <StatCard label="Torneos activos" value={activeTournaments.length} icon={Trophy} />
+        <StatCard label="Inscripciones abiertas" value={openTournaments.length} icon={UserCheck} tone="orange" />
+        <StatCard label="Jugadores registrados" value={players.length} icon={UsersRound} />
+        <StatCard label="Partidos por atender" value={pendingMatches.length} icon={CalendarCheck} tone="orange" />
+        <StatCard label="Descensos pendientes" value={pendingDescents.length} icon={MessageSquareWarning} />
         <StatCard label="Reclamos pendientes" value={mockDiscipline.claims.filter((claim) => claim.status === "Pendiente").length} icon={ShieldAlert} tone="orange" />
-        <StatCard label="Jugadores bloqueados" value={players.filter((player) => player.status.includes("Bloqueado")).length} icon={ShieldAlert} />
+        <StatCard label="Jugadores bloqueados" value={players.filter((player) => player.status.includes("Bloqueado")).length} icon={AlertTriangle} />
       </div>
+
+      <div className="dashboard-columns dashboard-columns--featured">
+        <Card className="admin-attention-card">
+          <div className="section-title">
+            <span>Necesita atencion</span>
+          </div>
+          <div className="compact-list">
+            {pendingDescents.map((request) => (
+              <Link key={request.id} className="notice-row" to="/admin/requests">
+                <span className="notice-icon notice-icon--categoria"><MessageSquareWarning size={21} /></span>
+                <div>
+                  <strong>Solicitud de descenso</strong>
+                  <span>{request.currentCategoryName} a {request.requestedCategoryName}</span>
+                </div>
+                <Badge tone="warning">{request.status}</Badge>
+              </Link>
+            ))}
+            {pendingResults.slice(0, 2).map((match) => (
+              <Link key={match.id} className="notice-row" to={`/admin/matches/${match.id}`}>
+                <span className="notice-icon notice-icon--partido"><CalendarCheck size={21} /></span>
+                <div>
+                  <strong>{match.playerA} vs {match.playerB}</strong>
+                  <span>{match.tournament} / {match.status}</span>
+                </div>
+                <Badge tone={match.status === "W.O." ? "warning" : "info"}>{match.status}</Badge>
+              </Link>
+            ))}
+            {mockDiscipline.claims.filter((claim) => claim.status === "Pendiente").map((claim) => (
+              <Link key={claim.id} className="notice-row" to="/admin/discipline">
+                <span className="notice-icon notice-icon--disciplina"><ShieldAlert size={21} /></span>
+                <div>
+                  <strong>Reclamo disciplinario</strong>
+                  <span>{claim.reportedPlayer} / {claim.reason}</span>
+                </div>
+                <Badge tone="warning">Pendiente</Badge>
+              </Link>
+            ))}
+          </div>
+        </Card>
+
+        <Card>
+          <div className="section-title">
+            <span>Torneos y actividad</span>
+            <Link className="inline-link inline-link--compact" to="/admin/tournaments">Ver torneos</Link>
+          </div>
+          <div className="admin-timeline">
+            {tournaments.slice(0, 3).map((tournament) => (
+              <Link key={tournament.id} className="admin-timeline-item" to={`/admin/tournaments/${tournament.id}`}>
+                <div>
+                  <strong>{tournament.name}</strong>
+                  <span>{formatDate(tournament.startDate)} / {tournament.type}</span>
+                </div>
+                <Badge tone={tournament.status === "En juego" ? "info" : tournament.status === "Inscripciones abiertas" ? "success" : "neutral"}>
+                  {tournament.status}
+                </Badge>
+              </Link>
+            ))}
+          </div>
+          <div className="info-band">
+            <strong>Inscripciones mock</strong>
+            <span>{mockRegistrations.filter((registration) => registration.status === "Pendiente de pago").length} pendientes de pago y {mockRegistrations.filter((registration) => registration.status === "Confirmada").length} confirmadas.</span>
+          </div>
+        </Card>
+      </div>
+
       <Card>
         <div className="section-title">
-          <span>Actividad reciente</span>
+          <span>Avisos importantes</span>
+          <Link className="inline-link inline-link--compact" to="/admin/notifications">Ver todos</Link>
         </div>
-        <div className="compact-list">
-          {activity.map((item) => (
-            <div key={item.id} className="compact-item">
+        <div className="admin-event-grid">
+          {activity.slice(0, 4).map((item) => (
+            <Link key={item.id} className="compact-item" to={item.actionTo || "/admin/notifications"}>
+              <Badge tone={item.read ? "neutral" : "warning"}>{item.type}</Badge>
               <strong>{item.title}</strong>
               <span>{item.message}</span>
-            </div>
+            </Link>
           ))}
         </div>
       </Card>

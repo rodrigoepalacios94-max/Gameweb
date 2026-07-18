@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { Badge } from "../common/Badge";
 
-export function BracketMatch({ match }) {
+export function BracketMatch({ match, detailBasePath = "/player/matches" }) {
   const content = (
     <>
       <div className={match.winner === match.playerA ? "bracket-player is-winner" : "bracket-player"}>
@@ -16,7 +16,7 @@ export function BracketMatch({ match }) {
 
   if (match.matchId) {
     return (
-      <Link className="bracket-match" to={`/player/matches/${match.matchId}`}>
+      <Link className="bracket-match" to={`${detailBasePath}/${match.matchId}`}>
         {content}
       </Link>
     );

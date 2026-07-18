@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, Bell, CalendarClock, CreditCard, Medal, Trophy, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowRight, Bell, CalendarClock, CreditCard, Medal, MessageSquareWarning, Trophy, Wrench } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Badge } from "../common/Badge";
 
@@ -10,6 +10,8 @@ const iconByType = {
   Resultado: Medal,
   Ranking: Medal,
   Disciplina: AlertTriangle,
+  Categoria: MessageSquareWarning,
+  Programacion: CalendarClock,
   Sistema: Wrench,
 };
 

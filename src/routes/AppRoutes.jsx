@@ -7,11 +7,15 @@ import { AdminDashboardPage } from "../pages/admin/AdminDashboardPage";
 import { AdminDisciplinePage } from "../pages/admin/AdminDisciplinePage";
 import { AdminMatchesPage } from "../pages/admin/AdminMatchesPage";
 import { AdminNotificationsPage } from "../pages/admin/AdminNotificationsPage";
+import { AdminPlayerDetailPage } from "../pages/admin/AdminPlayerDetailPage";
 import { AdminPlayersPage } from "../pages/admin/AdminPlayersPage";
 import { AdminRankingPage } from "../pages/admin/AdminRankingPage";
+import { AdminRequestsPage } from "../pages/admin/AdminRequestsPage";
 import { AdminSettingsPage } from "../pages/admin/AdminSettingsPage";
 import { AdminTournamentCreatePage } from "../pages/admin/AdminTournamentCreatePage";
+import { AdminTournamentDetailPage } from "../pages/admin/AdminTournamentDetailPage";
 import { AdminTournamentsPage } from "../pages/admin/AdminTournamentsPage";
+import { AdminMatchDetailPage } from "../pages/admin/AdminMatchDetailPage";
 import { PlayerHomePage } from "../pages/player/PlayerHomePage";
 import { PlayerMatchesPage } from "../pages/player/PlayerMatchesPage";
 import { PlayerMatchDetailPage } from "../pages/player/PlayerMatchDetailPage";
@@ -46,11 +50,15 @@ export function AppRoutes() {
         <Route index element={<AdminDashboardPage />} />
         <Route path="tournaments" element={<AdminTournamentsPage />} />
         <Route path="tournaments/new" element={<AdminTournamentCreatePage />} />
+        <Route path="tournaments/:id" element={<AdminTournamentDetailPage />} />
         <Route path="players" element={<AdminPlayersPage />} />
+        <Route path="players/:id" element={<AdminPlayerDetailPage />} />
         <Route path="ranking" element={<AdminRankingPage />} />
         <Route path="categories" element={<AdminCategoriesPage />} />
         <Route path="matches" element={<AdminMatchesPage />} />
+        <Route path="matches/:id" element={<AdminMatchDetailPage />} />
         <Route path="discipline" element={<AdminDisciplinePage />} />
+        <Route path="requests" element={<AdminRequestsPage />} />
         <Route path="notifications" element={<AdminNotificationsPage />} />
         <Route path="settings" element={<AdminSettingsPage />} />
       </Route>

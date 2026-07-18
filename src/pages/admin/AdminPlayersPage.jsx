@@ -1,64 +1,73 @@
 import { useMemo, useState } from "react";
-import { Ban, Pencil, RotateCcw } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Eye, Plus } from "lucide-react";
+import { Avatar } from "../../components/common/Avatar";
+import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
-import { Modal } from "../../components/common/Modal";
+import { EmptyState } from "../../components/common/EmptyState";
 import { SearchInput } from "../../components/common/SearchInput";
 import { Select } from "../../components/common/Select";
-import { PlayerRow } from "../../components/admin/PlayerRow";
+import { mockCategories } from "../../mocks/mockCategories";
 import { playerService } from "../../services/playerService";
 import { normalizeText } from "../../utils/formatters";
 
 export function AdminPlayersPage() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("Todos");
-  const [selectedPlayer, setSelectedPlayer] = useState(null);
+  const [categoryId, setCategoryId] = useState("Todos");
   const players = playerService.getPlayers();
   const filteredPlayers = useMemo(
-    () => players.filter((player) => {
-      const matchesQuery = normalizeText(player.fullName).includes(normalizeText(query));
-      const matchesStatus = status === "Todos" || player.status === status;
-      return matchesQuery && matchesStatus;
-    }),
-    [players, query, status],
+    () =>
+      players.filter((player) => {
+        const matchesQuery = normalizeText(player.fullName).includes(normalizeText(query));
+        const matchesStatus = status === "Todos" || player.status === status;
+        const matchesCategory = categoryId === "Todos" || player.categoryId === categoryId;
+        return matchesQuery && matchesStatus && matchesCategory;
+      }),
+    [players, query, status, categoryId],
   );
 
   return (
     <div className="page-stack">
-      <header className="page-header">
-        <span className="eyebrow">Gestion</span>
-        <h1>Jugadores</h1>
+      <header className="page-header page-header--actions page-header--wide">
+        <div>
+          <span className="eyebrow">Gestion</span>
+          <h1>Jugadores</h1>
+          <p>Consulta estado deportivo, categoria vigente, ranking, puntos, faltas y bloqueos.</p>
+        </div>
+        <Button icon={Plus}>Nuevo jugador</Button>
       </header>
+
       <Card>
         <div className="toolbar">
           <SearchInput value={query} onChange={setQuery} placeholder="Buscar jugador" />
+          <Select value={categoryId} onChange={setCategoryId} options={[{ value: "Todos", label: "Todas las categorias" }, ...mockCategories.map((category) => ({ value: category.id, label: `${category.name} ${category.branch}` }))]} />
           <Select value={status} onChange={setStatus} options={["Todos", "Activo", "Suspendido", "Bloqueado por faltas"].map((item) => ({ value: item, label: item }))} />
         </div>
-        <div className="table-list">
-          {filteredPlayers.map((player) => <PlayerRow key={player.id} player={player} onClick={setSelectedPlayer} />)}
-        </div>
-      </Card>
-      <Modal open={Boolean(selectedPlayer)} title="Detalle del jugador" onClose={() => setSelectedPlayer(null)}>
-        {selectedPlayer ? (
-          <div className="page-stack compact">
-            <h3>{selectedPlayer.fullName}</h3>
-            <div className="info-list">
-              <span>Categoria: {selectedPlayer.categoryName}</span>
-              <span>Ranking: #{selectedPlayer.ranking}</span>
-              <span>Puntos: {selectedPlayer.points}</span>
-              <span>Partidos: {selectedPlayer.stats.played}</span>
-              <span>Torneos: {selectedPlayer.stats.tournaments}</span>
-              <span>Estado disciplinario: {selectedPlayer.discipline.status}</span>
-            </div>
-            <div className="card-actions">
-              <Button variant="secondary" icon={Pencil}>Cambiar categoria</Button>
-              <Button variant="secondary" icon={Pencil}>Modificar puntos</Button>
-              <Button variant="ghost" icon={Ban}>Bloquear</Button>
-              <Button variant="ghost" icon={RotateCcw}>Desbloquear</Button>
-            </div>
+
+        {filteredPlayers.length ? (
+          <div className="admin-table">
+            {filteredPlayers.map((player) => (
+              <div key={player.id} className="admin-table-row admin-table-row--players">
+                <Avatar src={player.avatar} name={player.fullName} size="sm" />
+                <strong>{player.fullName}</strong>
+                <span>{player.categoryName}</span>
+                <span>#{player.ranking}</span>
+                <span>{player.points} pts</span>
+                <span>{player.discipline.faults}/{player.discipline.limit}</span>
+                <Badge tone={player.status === "Activo" ? "success" : player.status.includes("Bloqueado") ? "danger" : "warning"}>{player.status}</Badge>
+                <Link className="button button--outline-green button--sm" to={`/admin/players/${player.id}`}>
+                  <Eye size={16} />
+                  <span>Ver</span>
+                </Link>
+              </div>
+            ))}
           </div>
-        ) : null}
-      </Modal>
+        ) : (
+          <EmptyState title="Sin jugadores para este filtro" description="Cambia los filtros o registra un nuevo jugador." />
+        )}
+      </Card>
     </div>
   );
 }

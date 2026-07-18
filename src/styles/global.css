@@ -190,7 +190,8 @@ img {
 .page-header,
 .detail-hero,
 .player-hero,
-.profile-header {
+.profile-header,
+.admin-hero {
   display: grid;
   gap: var(--space-4);
   align-items: center;
@@ -224,7 +225,8 @@ img {
 
 .player-hero,
 .detail-hero,
-.profile-header {
+.profile-header,
+.admin-hero {
   position: relative;
   min-height: 218px;
   padding: var(--space-8);
@@ -236,6 +238,23 @@ img {
     linear-gradient(135deg, rgba(207, 219, 47, 0.1) 0%, rgba(207, 219, 47, 0) 45%),
     #0d0f12;
   box-shadow: var(--shadow-card);
+}
+
+.admin-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-6);
+}
+
+.admin-hero h1 {
+  margin-bottom: var(--space-3);
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: flex-end;
 }
 
 .player-hero {
@@ -717,7 +736,7 @@ img {
 }
 
 .admin-mobile-nav {
-  grid-template-columns: repeat(9, minmax(54px, 1fr));
+  grid-template-columns: repeat(10, minmax(54px, 1fr));
 }
 
 .bottom-nav a {
@@ -1333,6 +1352,140 @@ img {
   color: var(--color-muted);
 }
 
+.admin-table {
+  display: grid;
+  gap: var(--space-3);
+  width: 100%;
+  margin-top: var(--space-4);
+}
+
+.admin-table-row {
+  display: grid;
+  gap: var(--space-3);
+  align-items: center;
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.admin-table-row:hover,
+.admin-timeline-item:hover,
+.schedule-slot:hover,
+.settings-card:hover,
+.publish-item:hover {
+  border-color: rgba(207, 219, 47, 0.28);
+  background: rgba(255, 255, 255, 0.052);
+}
+
+.admin-table-row--players {
+  grid-template-columns: auto minmax(170px, 1.4fr) minmax(120px, 0.8fr) 60px 90px 70px auto auto;
+}
+
+.admin-table-row--matches {
+  grid-template-columns: minmax(160px, 1.4fr) minmax(110px, 0.9fr) minmax(80px, 0.7fr) minmax(140px, 0.9fr) minmax(90px, 0.7fr) auto auto;
+}
+
+.admin-table-row--registrations {
+  grid-template-columns: auto minmax(150px, 1.3fr) minmax(120px, 0.8fr) minmax(110px, 0.8fr) auto auto;
+}
+
+.admin-table-row--requests {
+  grid-template-columns: auto minmax(150px, 1.2fr) minmax(110px, 0.8fr) minmax(130px, 0.8fr) minmax(110px, 0.8fr) auto minmax(170px, auto);
+}
+
+.admin-table-row--ranking {
+  grid-template-columns: 50px auto minmax(150px, 1.2fr) minmax(120px, 0.9fr) 90px auto;
+}
+
+.admin-table-row--scoring {
+  grid-template-columns: auto minmax(110px, 1fr) repeat(3, minmax(100px, 0.8fr)) auto;
+}
+
+.admin-table-row--faults {
+  grid-template-columns: auto minmax(160px, 1fr) minmax(160px, 1.2fr) minmax(110px, 0.7fr);
+}
+
+.admin-table-row span,
+.admin-timeline-item span,
+.schedule-slot span,
+.schedule-slot small,
+.publish-item span {
+  color: var(--color-muted);
+}
+
+.admin-timeline,
+.admin-create-section,
+.publish-grid,
+.settings-grid,
+.schedule-board,
+.admin-event-grid {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.admin-event-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.admin-timeline-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.admin-attention-card {
+  align-content: start;
+}
+
+.inline-link--compact {
+  margin: 0;
+}
+
+.schedule-board {
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  margin: var(--space-4) 0;
+}
+
+.schedule-slot,
+.settings-card,
+.publish-item {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.schedule-slot p,
+.settings-card p {
+  margin: 0;
+}
+
+.settings-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.settings-card {
+  align-content: start;
+}
+
+.publish-grid {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.publish-item svg,
+.settings-card .feature-icon {
+  color: var(--color-green);
+}
+
 .card-actions,
 .wizard-actions,
 .toolbar {
@@ -1606,13 +1759,23 @@ textarea {
   }
 
   .profile-header,
-  .player-hero {
+  .player-hero,
+  .admin-hero {
     grid-template-columns: 1fr;
   }
 
-  .player-hero {
+  .player-hero,
+  .admin-hero {
     min-height: 260px;
     padding: var(--space-6);
+  }
+
+  .admin-hero {
+    display: grid;
+  }
+
+  .hero-actions {
+    justify-content: flex-start;
   }
 
   .hero-copy h1 {
@@ -1652,7 +1815,15 @@ textarea {
   .versus-card,
   .ranking-pro-row,
   .notification-item__content,
-  .page-header--actions {
+  .page-header--actions,
+  .admin-table-row--players,
+  .admin-table-row--matches,
+  .admin-table-row--registrations,
+  .admin-table-row--requests,
+  .admin-table-row--ranking,
+  .admin-table-row--scoring,
+  .admin-table-row--faults,
+  .admin-timeline-item {
     grid-template-columns: 1fr;
   }
 
@@ -1678,6 +1849,13 @@ textarea {
   .match-grid,
   .profile-stat-grid,
   .podium-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-event-grid,
+  .settings-grid,
+  .schedule-board,
+  .publish-grid {
     grid-template-columns: 1fr;
   }
 

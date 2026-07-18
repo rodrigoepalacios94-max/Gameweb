@@ -5,6 +5,7 @@ import {
   ChevronDown,
   Gauge,
   Medal,
+  MessageSquareWarning,
   Settings,
   ShieldAlert,
   Tags,
@@ -18,13 +19,14 @@ import { notificationService } from "../services/notificationService";
 import logoGame from "../assets/logo-game.png";
 
 const adminNav = [
-  { to: "/admin", label: "Dashboard", icon: Gauge, end: true },
+  { to: "/admin", label: "Inicio", icon: Gauge, end: true },
   { to: "/admin/tournaments", label: "Torneos", icon: Trophy },
   { to: "/admin/players", label: "Jugadores", icon: UsersRound },
-  { to: "/admin/ranking", label: "Ranking", icon: Medal },
   { to: "/admin/categories", label: "Categorias", icon: Tags },
+  { to: "/admin/ranking", label: "Ranking", icon: Medal },
   { to: "/admin/matches", label: "Partidos", icon: CalendarClock },
   { to: "/admin/discipline", label: "Disciplina", icon: ShieldAlert },
+  { to: "/admin/requests", label: "Solicitudes", icon: MessageSquareWarning },
   { to: "/admin/notifications", label: "Avisos", icon: Bell },
   { to: "/admin/settings", label: "Configuracion", icon: Settings },
 ];
