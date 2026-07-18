@@ -7,7 +7,6 @@ export const mockRegistrations = [
     categoryName: "4a Masculino",
     status: "Pendiente de pago",
     date: "2026-07-18",
-    unavailableSlots: ["Sabado 12:00", "Domingo 09:00"],
     payment: "Pendiente",
   },
   {
@@ -18,7 +17,6 @@ export const mockRegistrations = [
     categoryName: "4a Masculino",
     status: "Confirmada",
     date: "2026-07-06",
-    unavailableSlots: ["Sabado 09:00"],
     payment: "Confirmado",
   },
   {
@@ -29,7 +27,6 @@ export const mockRegistrations = [
     categoryName: "3a Masculino",
     status: "Confirmada",
     date: "2026-07-17",
-    unavailableSlots: ["Domingo 12:00"],
     payment: "Confirmado",
   },
   {
@@ -40,7 +37,6 @@ export const mockRegistrations = [
     categoryName: "5a Masculino",
     status: "Lista de espera",
     date: "2026-07-18",
-    unavailableSlots: ["Sabado 16:00"],
     payment: "Bloqueado por faltas",
   },
 ];

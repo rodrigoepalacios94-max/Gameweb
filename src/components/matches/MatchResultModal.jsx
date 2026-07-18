@@ -32,12 +32,6 @@ function normalizeRows(rows) {
     }));
 }
 
-function getWinnerName(match, winnerId) {
-  if (winnerId === match.playerAId) return match.playerA;
-  if (winnerId === match.playerBId) return match.playerB;
-  return "Pendiente";
-}
-
 export function MatchResultModal({ open, matchId, onClose, onSaved }) {
   const [match, setMatch] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -89,6 +83,7 @@ export function MatchResultModal({ open, matchId, onClose, onSaved }) {
   }, [match, normalizedRows]);
   const formatDescription = match ? describeMatchFormat(match.matchFormat) : null;
   const winnerId = resultPreview?.valid ? resultPreview.winnerId : manualWinnerId;
+  const confirmedWinnerId = match?.status === "Finalizado" || match?.status === "W.O." ? match.winnerId : null;
 
   function updateResultRow(index, field, value) {
     setResultRows((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)));
@@ -173,7 +168,7 @@ export function MatchResultModal({ open, matchId, onClose, onSaved }) {
           </div>
 
           <div className="matchup-panel">
-            <div className={winnerId === match.playerAId ? "matchup-player is-winner" : "matchup-player"}>
+            <div className={confirmedWinnerId === match.playerAId ? "matchup-player is-winner" : "matchup-player"}>
               <Avatar src={match.playerAAvatar} name={match.playerA} />
               <div>
                 <strong>{match.playerA}</strong>
@@ -181,7 +176,7 @@ export function MatchResultModal({ open, matchId, onClose, onSaved }) {
               </div>
             </div>
             <span className="matchup-versus">VS</span>
-            <div className={winnerId === match.playerBId ? "matchup-player is-winner" : "matchup-player"}>
+            <div className={confirmedWinnerId === match.playerBId ? "matchup-player is-winner" : "matchup-player"}>
               <Avatar src={match.playerBAvatar} name={match.playerB} />
               <div>
                 <strong>{match.playerB}</strong>
@@ -247,12 +242,7 @@ export function MatchResultModal({ open, matchId, onClose, onSaved }) {
             </div>
           ) : null}
 
-          {resultPreview?.valid ? (
-            <div className="winner-preview">
-              <span>Ganador previsto</span>
-              <strong>{getWinnerName(match, resultPreview.winnerId)}</strong>
-            </div>
-          ) : resultPreview?.error && !earlyFinish ? (
+          {resultPreview?.error && !earlyFinish ? (
             <p className="field-error">{resultPreview.error}</p>
           ) : null}
           {match.resultDetail?.earlyFinishReason ? <p className="mock-note">Motivo registrado: {match.resultDetail.earlyFinishReason}</p> : null}

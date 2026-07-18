@@ -13,6 +13,7 @@ import { Select } from "../../components/common/Select";
 import { MatchScore } from "../../components/player/MatchScore";
 import { useAsyncData } from "../../hooks/useAsyncData";
 import { matchService } from "../../services/matchService";
+import { schedulingService } from "../../services/schedulingService";
 import { formatDate } from "../../utils/formatters";
 import { describeMatchFormat, getMatchFormatRows } from "../../utils/matchFormat";
 
@@ -115,6 +116,11 @@ export function AdminMatchDetailPage() {
     reload();
   }
 
+  async function suspendMatch() {
+    await schedulingService.suspendMatch(match.id, "Suspension individual desde detalle de partido");
+    reload();
+  }
+
   return (
     <div className="page-stack">
       <header className="detail-hero match-detail-hero">
@@ -151,6 +157,7 @@ export function AdminMatchDetailPage() {
         <Button icon={Trophy} onClick={() => setModal("result")}>{match.result ? "Editar resultado" : "Cargar resultado"}</Button>
         <Button variant="secondary" icon={AlertTriangle} onClick={() => setModal("walkover")}>Registrar W.O.</Button>
         <Button variant="ghost" icon={Edit3} onClick={() => setModal("schedule")}>Reprogramar</Button>
+        {!["Finalizado", "W.O.", "Doble W.O."].includes(match.status) ? <Button variant="ghost" icon={AlertTriangle} onClick={suspendMatch}>Suspender partido</Button> : null}
       </div>
 
       <div className="detail-grid">
@@ -194,12 +201,7 @@ export function AdminMatchDetailPage() {
               </div>
             ))}
           </div>
-          {resultPreview?.valid ? (
-            <div className="winner-preview">
-              <span>Ganador</span>
-              <strong>{resultPreview.winnerId === match.playerAId ? match.playerA : match.playerB}</strong>
-            </div>
-          ) : resultPreview?.error ? (
+          {resultPreview?.error ? (
             <p className="field-error">{resultPreview.error}</p>
           ) : null}
           {formError ? <p className="field-error">{formError}</p> : null}

@@ -10,15 +10,18 @@ import {
   UsersRound,
   Zap,
 } from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Avatar } from "../../components/common/Avatar";
 import { Badge } from "../../components/common/Badge";
+import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
 import { ErrorState } from "../../components/common/ErrorState";
 import { LoadingState } from "../../components/common/LoadingState";
 import { StatCard } from "../../components/common/StatCard";
 import { useAuth } from "../../context/AuthContext";
 import { useAsyncData } from "../../hooks/useAsyncData";
+import { availabilityService } from "../../services/availabilityService";
 import { matchService } from "../../services/matchService";
 import { notificationService } from "../../services/notificationService";
 import { tournamentService } from "../../services/tournamentService";
@@ -26,13 +29,16 @@ import { formatCurrency, formatDate } from "../../utils/formatters";
 
 export function PlayerHomePage() {
   const { user } = useAuth();
+  const [selectedUnavailableSlots, setSelectedUnavailableSlots] = useState([]);
+  const attendanceSlots = ["2026-08-08 10:00", "2026-08-08 12:00", "2026-08-08 14:00", "2026-08-09 09:00", "2026-08-09 11:00", "2026-08-09 13:00"];
   const { data, loading, error, reload } = useAsyncData(async () => {
-    const [matches, tournaments, notifications] = await Promise.all([
+    const [matches, tournaments, notifications, attendanceRequests] = await Promise.all([
       matchService.getPlayerMatches(user.id),
       tournamentService.getTournaments(),
       notificationService.getNotificationsByRole("player"),
+      availabilityService.getPlayerAttendanceRequests(user.id),
     ]);
-    return { matches, tournaments, notifications };
+    return { matches, tournaments, notifications, attendanceRequests };
   }, [user.id]);
 
   if (loading) return <LoadingState message="Cargando tu dashboard..." />;
@@ -42,6 +48,18 @@ export function PlayerHomePage() {
   const featuredTournament = data.tournaments.find((tournament) => tournament.status === "Inscripciones abiertas");
   const latestResults = data.matches.filter((match) => match.status === "Finalizado");
   const importantNotifications = data.notifications.filter((notification) => !notification.read).slice(0, 3);
+  const attendanceRequest = data.attendanceRequests.find((match) => match.needsAttendanceConfirmation) || data.attendanceRequests[0];
+
+  function toggleUnavailableSlot(slot) {
+    setSelectedUnavailableSlots((current) => (current.includes(slot) ? current.filter((item) => item !== slot) : [...current, slot]));
+  }
+
+  async function confirmAttendance() {
+    if (!attendanceRequest) return;
+    await availabilityService.confirmAttendance(attendanceRequest.id, user.id, selectedUnavailableSlots);
+    setSelectedUnavailableSlots([]);
+    reload();
+  }
 
   return (
     <div className="page-stack player-dashboard">
@@ -67,6 +85,32 @@ export function PlayerHomePage() {
       </div>
 
       <section className="dashboard-columns dashboard-columns--featured">
+        {attendanceRequest?.needsAttendanceConfirmation ? (
+          <Card className="feature-card attendance-card">
+            <div className="section-title">
+              <span>Confirmar asistencia</span>
+              <Badge tone="warning">Requerido</Badge>
+            </div>
+            <h2>{attendanceRequest.round}</h2>
+            <p>{attendanceRequest.tournament}</p>
+            <div className="match-rival-block">
+              <Avatar src={attendanceRequest.opponentAvatar} name={attendanceRequest.opponent || "A definir"} />
+              <div>
+                <span>Rival</span>
+                <strong>{attendanceRequest.pendingRival ? "A definir" : attendanceRequest.opponent}</strong>
+              </div>
+            </div>
+            <div className="slot-grid slot-grid--compact">
+              {attendanceSlots.map((slot) => (
+                <button key={slot} className={selectedUnavailableSlots.includes(slot) ? "slot is-selected" : "slot"} type="button" onClick={() => toggleUnavailableSlot(slot)}>
+                  No puedo {slot}
+                </button>
+              ))}
+            </div>
+            <Button className="button--full" onClick={confirmAttendance}>Confirmar asistencia</Button>
+          </Card>
+        ) : null}
+
         {nextMatch ? (
           <Card className="feature-card next-match-card">
             <div className="section-title">

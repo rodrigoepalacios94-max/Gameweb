@@ -3,6 +3,7 @@ import { DEFAULT_MATCH_FORMAT, formatResultSets, getSetsToWin, isDecidingSuperTi
 import { buildDevTestBracketFromPreliminaries } from "../dev/tournamentTestFactory";
 import { auditService } from "./auditService";
 import { mockRequest } from "./serviceUtils";
+import { ensureTournamentCategoryStages } from "./tournamentCategoryService";
 
 function getTournament(db, tournamentId) {
   return db.tournaments.find((tournament) => tournament.id === tournamentId) || null;
@@ -11,9 +12,10 @@ function getTournament(db, tournamentId) {
 function withTournamentFormat(db, match) {
   if (!match) return null;
   const tournament = getTournament(db, match.tournamentId);
+  const categoryStage = tournament ? ensureTournamentCategoryStages(db, tournament).find((stage) => stage.categoryId === match.categoryId) : null;
   return {
     ...match,
-    matchFormat: normalizeMatchFormat(tournament?.matchFormat || match.matchFormat || DEFAULT_MATCH_FORMAT),
+    matchFormat: normalizeMatchFormat(categoryStage?.matchFormat || tournament?.matchFormat || match.matchFormat || DEFAULT_MATCH_FORMAT),
   };
 }
 
@@ -158,28 +160,34 @@ function assignPlayerToBracketSlot(bracketMatch, side, player) {
 }
 
 function createMatchFromBracket(db, tournament, round, bracketMatch) {
-  if (bracketMatch.matchId || !bracketMatch.playerAId || !bracketMatch.playerBId || bracketMatch.playerB === "BYE") return null;
+  if (bracketMatch.matchId || (!bracketMatch.playerAId && !bracketMatch.playerBId) || bracketMatch.playerB === "BYE") return null;
+  const categoryStage = ensureTournamentCategoryStages(db, tournament).find((stage) => stage.categoryName === tournament.playerCategoryName || stage.categoryId === bracketMatch.categoryId) || ensureTournamentCategoryStages(db, tournament)[0];
   const id = createMockId("match");
   const match = {
     id,
     tournamentId: tournament.id,
     tournament: tournament.name,
-    category: tournament.playerCategoryName,
+    categoryId: categoryStage?.categoryId || tournament.playerCategoryId,
+    category: categoryStage?.categoryName || tournament.playerCategoryName,
     round: round.name,
     phase: round.name === "Preliminar" ? "Preliminar" : "Cuadro principal",
     playerAId: bracketMatch.playerAId,
-    playerA: bracketMatch.playerA,
+    playerA: bracketMatch.playerA || "A definir",
     playerAAvatar: bracketMatch.playerAAvatar,
     playerBId: bracketMatch.playerBId,
-    playerB: bracketMatch.playerB,
+    playerB: bracketMatch.playerBId ? bracketMatch.playerB : "A definir",
     playerBAvatar: bracketMatch.playerBAvatar,
-    opponentId: bracketMatch.playerBId,
-    opponent: bracketMatch.playerB,
+    opponentId: bracketMatch.playerBId || null,
+    opponent: bracketMatch.playerBId ? bracketMatch.playerB : "A definir",
     opponentAvatar: bracketMatch.playerBAvatar,
     date: tournament.startDate,
     time: "A definir",
     court: "A definir",
-    status: "Pendiente",
+    status: "Pendiente de asistencia",
+    attendanceStatus: {
+      ...(bracketMatch.playerAId ? { [bracketMatch.playerAId]: "Pendiente" } : {}),
+      ...(bracketMatch.playerBId ? { [bracketMatch.playerBId]: "Pendiente" } : {}),
+    },
     result: null,
     resultDetail: null,
     sets: [],
@@ -194,6 +202,31 @@ function createMatchFromBracket(db, tournament, round, bracketMatch) {
   return match;
 }
 
+function syncExistingMatchFromBracket(db, bracketMatch) {
+  if (!bracketMatch.matchId) return null;
+  const target = db.matches.find((item) => item.id === bracketMatch.matchId);
+  if (!target) return null;
+  const previousPlayerIds = [target.playerAId, target.playerBId].filter(Boolean);
+  Object.assign(target, {
+    playerAId: bracketMatch.playerAId,
+    playerA: bracketMatch.playerA || "A definir",
+    playerAAvatar: bracketMatch.playerAAvatar,
+    playerBId: bracketMatch.playerBId,
+    playerB: bracketMatch.playerBId ? bracketMatch.playerB : "A definir",
+    playerBAvatar: bracketMatch.playerBAvatar,
+    opponentId: bracketMatch.playerBId || null,
+    opponent: bracketMatch.playerBId ? bracketMatch.playerB : "A definir",
+    opponentAvatar: bracketMatch.playerBAvatar,
+  });
+  const currentPlayerIds = [target.playerAId, target.playerBId].filter(Boolean);
+  target.attendanceStatus = {
+    ...(target.attendanceStatus || {}),
+    ...Object.fromEntries(currentPlayerIds.filter((playerId) => !previousPlayerIds.includes(playerId)).map((playerId) => [playerId, "Pendiente"])),
+  };
+  if (target.status === "Pendiente" && currentPlayerIds.length) target.status = "Pendiente de asistencia";
+  return target;
+}
+
 function clearDownstreamIfNeeded(nextMatch, winner) {
   if (!winner) return;
   if (nextMatch.winner && nextMatch.winner !== winner.name) {
@@ -205,8 +238,9 @@ function clearDownstreamIfNeeded(nextMatch, winner) {
 }
 
 function advanceBracketWinner(db, match) {
-  const bracket = db.brackets[match.tournamentId];
   const tournament = getTournament(db, match.tournamentId);
+  const categoryStage = tournament ? ensureTournamentCategoryStages(db, tournament).find((stage) => stage.categoryId === match.categoryId) : null;
+  const bracket = db.brackets[categoryStage?.bracketKey] || db.brackets[match.tournamentId];
   if (!bracket || !tournament) return;
 
   bracket.preliminaries = (bracket.preliminaries || []).map((preliminary) => {
@@ -244,6 +278,11 @@ function advanceBracketWinner(db, match) {
     const targetSide = isRoundOf32 ? "B" : matchIndex % 2 === 0 ? "A" : "B";
     assignPlayerToBracketSlot(nextMatch, targetSide, winner);
     clearDownstreamIfNeeded(nextMatch, winner);
+    nextMatch.categoryId = match.categoryId;
+    if (nextMatch.matchId) {
+      syncExistingMatchFromBracket(db, nextMatch);
+      return;
+    }
     createMatchFromBracket(db, tournament, nextRound, nextMatch);
     return;
   }
@@ -261,7 +300,8 @@ function calculatePreliminaryPerformance(result, winnerId, match) {
 
 function maybeBuildDevBracket(db, match) {
   const tournament = getTournament(db, match.tournamentId);
-  const bracket = db.brackets[match.tournamentId];
+  const categoryStage = tournament ? ensureTournamentCategoryStages(db, tournament).find((stage) => stage.categoryId === match.categoryId) : null;
+  const bracket = db.brackets[categoryStage?.bracketKey] || db.brackets[match.tournamentId];
   if (!tournament?.isDevTest || !bracket || bracket.rounds?.length) return;
   const preliminaries = db.matches
     .filter((item) => item.tournamentId === match.tournamentId && item.phase === "Preliminar")
@@ -332,8 +372,12 @@ export const matchService = {
   async getMatchesByPlayer(playerId) {
     return this.getPlayerMatches(playerId);
   },
-  async getMatchesByTournament(tournamentId) {
-    return mockRequest(() => readMockData((db) => db.matches.filter((match) => match.tournamentId === tournamentId).map((match) => withTournamentFormat(db, match))), "No pudimos cargar los partidos del torneo.");
+  async getMatchesByTournament(tournamentId, categoryId = null) {
+    return mockRequest(() => readMockData((db) =>
+      db.matches
+        .filter((match) => match.tournamentId === tournamentId)
+        .filter((match) => !categoryId || match.categoryId === categoryId)
+        .map((match) => withTournamentFormat(db, match))), "No pudimos cargar los partidos del torneo.");
   },
   async savePartialResult(id, { sets = [] }, actor = "admin-1") {
     return mockRequest(async () => {

@@ -16,20 +16,16 @@ import { formatCurrency } from "../../utils/formatters";
 
 const steps = [
   { id: "category", label: "Categoria" },
-  { id: "availability", label: "Disponibilidad" },
   { id: "summary", label: "Resumen" },
   { id: "payment", label: "Pago" },
   { id: "confirmed", label: "Confirmada" },
 ];
-
-const slots = ["Sabado 9:00", "Sabado 12:00", "Sabado 16:00", "Domingo 9:00", "Domingo 12:00", "Domingo 16:00"];
 
 export function PlayerTournamentRegistrationPage() {
   const { id } = useParams();
   const { user } = useAuth();
   const [stepIndex, setStepIndex] = useState(0);
   const [selectedCategoryId, setSelectedCategoryId] = useState(user.categoryId);
-  const [blockedSlots, setBlockedSlots] = useState([]);
   const [descentRequested, setDescentRequested] = useState(false);
   const { data, loading, error, reload } = useAsyncData(async () => {
     const [tournament, tournamentCategories, categoryRules] = await Promise.all([
@@ -50,10 +46,6 @@ export function PlayerTournamentRegistrationPage() {
 
   const { tournament, tournamentCategories, categoryRules } = data;
   if (!tournament) return <Card>Torneo no encontrado.</Card>;
-
-  function toggleSlot(slot) {
-    setBlockedSlots((current) => (current.includes(slot) ? current.filter((item) => item !== slot) : [...current, slot]));
-  }
 
   function next() {
     setStepIndex((current) => Math.min(current + 1, steps.length - 1));
@@ -109,20 +101,6 @@ export function PlayerTournamentRegistrationPage() {
         </Card>
       ) : null}
 
-      {steps[stepIndex].id === "availability" ? (
-        <Card>
-          <h2>Disponibilidad</h2>
-          <p className="muted">Marca solo los horarios en los que NO podes jugar.</p>
-          <div className="slot-grid">
-            {slots.map((slot) => (
-              <button key={slot} className={blockedSlots.includes(slot) ? "slot is-selected" : "slot"} onClick={() => toggleSlot(slot)} type="button">
-                {slot}
-              </button>
-            ))}
-          </div>
-        </Card>
-      ) : null}
-
       {steps[stepIndex].id === "summary" ? (
         <Card>
           <h2>Resumen</h2>
@@ -130,7 +108,7 @@ export function PlayerTournamentRegistrationPage() {
             <span>Torneo: {tournament.name}</span>
             <span>Categoria: {selectedCategory?.name} {selectedCategory?.branch}</span>
             <span>Precio: {formatCurrency(tournament.price)}</span>
-            <span>No puedo jugar: {blockedSlots.length ? blockedSlots.join(", ") : "Sin restricciones"}</span>
+            <span>Disponibilidad: se solicita antes de cada partido.</span>
           </div>
         </Card>
       ) : null}

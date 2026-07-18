@@ -175,6 +175,17 @@ export function AdminTournamentCreatePage() {
       status: "Inscripciones abiertas",
       price: Number(form.price),
       categories: selectedCategories,
+      categoryStages: selectedCategories.map((categoryId) => {
+        const category = categories.find((item) => item.id === categoryId);
+        return {
+          categoryId,
+          categoryName: category ? `${category.name} ${category.branch}` : "Categoria",
+          format: form.type,
+          participants: [],
+          inscriptionsCount: 0,
+          status: "Inscripciones abiertas",
+        };
+      }),
       playerCategoryId: selectedCategories[0],
       playerCategoryName: selectedCategoryNames[0],
       schedule: { saturday, sunday },

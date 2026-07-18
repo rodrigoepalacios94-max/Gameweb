@@ -3,22 +3,42 @@ import { createMockId, mutateMockData, readMockData } from "../mocks/mockDatabas
 import { DEFAULT_MATCH_FORMAT } from "../utils/matchFormat";
 import { auditService } from "./auditService";
 import { mockRequest } from "./serviceUtils";
+import { ensureTournamentCategoryStages, tournamentCategoryService } from "./tournamentCategoryService";
+
+function getBracketKey(tournament, categoryId) {
+  if (!categoryId) return tournament?.categoryStages?.find((stage) => stage.categoryId === tournament.playerCategoryId)?.bracketKey || tournament?.id;
+  return tournament?.categoryStages?.find((stage) => stage.categoryId === categoryId)?.bracketKey || `${tournament?.id}::${categoryId}`;
+}
 
 export const tournamentService = {
   async getTournaments() {
     return mockRequest(() => readMockData((db) => db.tournaments), "No pudimos cargar los torneos.");
   },
   async getTournamentById(id) {
-    return mockRequest(() => readMockData((db) => db.tournaments.find((tournament) => tournament.id === id) || null), "No pudimos cargar el torneo.");
+    return mockRequest(() => readMockData((db) => {
+      const tournament = db.tournaments.find((item) => item.id === id) || null;
+      if (tournament) ensureTournamentCategoryStages(db, tournament);
+      return tournament;
+    }), "No pudimos cargar el torneo.");
   },
-  async getTournamentBracket(id) {
-    return mockRequest(() => readMockData((db) => db.brackets[id] || null), "No pudimos cargar el cuadro.");
+  async getTournamentBracket(id, categoryId = null) {
+    return mockRequest(() => readMockData((db) => {
+      const tournament = db.tournaments.find((item) => item.id === id);
+      if (tournament) ensureTournamentCategoryStages(db, tournament);
+      const key = getBracketKey(tournament, categoryId);
+      return db.brackets[key] || db.brackets[id] || null;
+    }), "No pudimos cargar el cuadro.");
   },
-  async getTournamentParticipants(id) {
+  async getTournamentParticipants(id, categoryId = null) {
     return mockRequest(() =>
       readMockData((db) => {
         const tournament = db.tournaments.find((item) => item.id === id);
-        return (tournament?.participants || []).map((playerId) => db.players.find((player) => player.id === playerId)).filter(Boolean);
+        if (!tournament) return [];
+        const stages = ensureTournamentCategoryStages(db, tournament);
+        const participantIds = categoryId
+          ? stages.find((stage) => stage.categoryId === categoryId)?.participants || []
+          : [...new Set(stages.flatMap((stage) => stage.participants || []))];
+        return participantIds.map((playerId) => db.players.find((player) => player.id === playerId)).filter(Boolean);
       }), "No pudimos cargar los participantes.");
   },
   async getTournamentCategories(id) {
@@ -27,6 +47,9 @@ export const tournamentService = {
         const tournament = db.tournaments.find((item) => item.id === id);
         return db.categories.filter((category) => tournament?.categories.includes(category.id));
       }), "No pudimos cargar las categorias del torneo.");
+  },
+  async getTournamentCategoryStages(id) {
+    return tournamentCategoryService.getCategoryStages(id);
   },
   async createTournament(payload, actor = "admin-1") {
     return mockRequest(async () => {
@@ -74,6 +97,18 @@ export const tournamentService = {
       });
       return tournament;
     }, "No pudimos actualizar el torneo.");
+  },
+  async closeRegistrations(id, actor = "admin-1") {
+    return tournamentCategoryService.closeRegistrations(id, actor);
+  },
+  async updateCategoryFormat(id, categoryId, format) {
+    return tournamentCategoryService.updateCategoryFormat(id, categoryId, format);
+  },
+  async generateCategoryBracket(id, categoryId) {
+    return tournamentCategoryService.generateCategoryBracket(id, categoryId);
+  },
+  async generateAllCategoryBrackets(id) {
+    return tournamentCategoryService.generateAllCategoryBrackets(id);
   },
   async cancelTournament(id, actor = "admin-1") {
     return this.updateTournament(id, { status: "Cancelado" }, actor);

@@ -45,6 +45,7 @@ function createPreliminaryMatch(tournament, pair, index) {
     id: `test-prelim-${tournament.id}-${index + 1}`,
     tournamentId: tournament.id,
     tournament: tournament.name,
+    categoryId: TEST_CATEGORY_ID,
     category: TEST_CATEGORY_NAME,
     round: "Preliminar",
     phase: "Preliminar",
@@ -121,6 +122,7 @@ function createBracketMatchRecord(db, tournament, round, bracketMatch, index) {
     id: `test-${round.id}-${tournament.id}-${index + 1}`,
     tournamentId: tournament.id,
     tournament: tournament.name,
+    categoryId: TEST_CATEGORY_ID,
     category: TEST_CATEGORY_NAME,
     round: round.name,
     phase: "Cuadro principal",
@@ -221,6 +223,7 @@ export function buildDevTestBracketFromPreliminaries(db, tournament, prelimMatch
 
   const bracket = {
     tournamentId: tournament.id,
+    categoryId: TEST_CATEGORY_ID,
     category: TEST_CATEGORY_NAME,
     isDevTest: true,
     testSummary: {
@@ -274,12 +277,33 @@ export function create34PlayerTestTournament(payload) {
       matchFormat: payload.matchFormat || DEFAULT_MATCH_FORMAT,
       price: Number(payload.price || 0),
       categories: [TEST_CATEGORY_ID],
+      categoryStages: [{
+        categoryId: TEST_CATEGORY_ID,
+        categoryName: TEST_CATEGORY_NAME,
+        format: "Preliminar",
+        participants: bots.map((bot) => bot.id),
+        inscriptionsCount: bots.length,
+        bracketKey: `${payload.id || "dev"}::${TEST_CATEGORY_ID}`,
+        status: "En juego",
+      }],
       playerCategoryId: TEST_CATEGORY_ID,
       playerCategoryName: TEST_CATEGORY_NAME,
       courts: ["Cancha 1", "Cancha 2", "Cancha 3", "Cancha 4"],
       isDevTest: true,
       ...payload,
       status: "En juego",
+      categories: [TEST_CATEGORY_ID],
+      categoryStages: [{
+        categoryId: TEST_CATEGORY_ID,
+        categoryName: TEST_CATEGORY_NAME,
+        format: "Preliminar",
+        participants: bots.map((bot) => bot.id),
+        inscriptionsCount: bots.length,
+        bracketKey: `${payload.id || "dev"}::${TEST_CATEGORY_ID}`,
+        status: "En juego",
+      }],
+      playerCategoryId: TEST_CATEGORY_ID,
+      playerCategoryName: TEST_CATEGORY_NAME,
       participants: bots.map((bot) => bot.id),
       phases: ["Preliminar", "32avos", "Cuadro principal"],
       name: payload.name.trim(),
@@ -287,6 +311,7 @@ export function create34PlayerTestTournament(payload) {
     };
 
     db.tournaments.push(tournament);
+    tournament.categoryStages[0].bracketKey = `${tournament.id}::${TEST_CATEGORY_ID}`;
     db.enrollments.push(...bots.map((bot) => ({
       id: `test-reg-${tournament.id}-${bot.id}`,
       tournamentId: tournament.id,
@@ -295,16 +320,17 @@ export function create34PlayerTestTournament(payload) {
       categoryName: TEST_CATEGORY_NAME,
       status: "Confirmada",
       date: tournament.startDate,
-      unavailableSlots: [],
       payment: "DEV TEST",
       isDevTest: true,
     })));
 
     const preliminaryMatches = pairPreliminaries(bots).map((pair, index) => createPreliminaryMatch(tournament, pair, index));
     db.matches.push(...preliminaryMatches);
-    db.brackets[tournament.id] = {
+    const initialBracket = {
       tournamentId: tournament.id,
+      categoryId: TEST_CATEGORY_ID,
       category: TEST_CATEGORY_NAME,
+      format: "Preliminar",
       isDevTest: true,
       preliminaries: preliminaryMatches.map((match) => ({
         matchId: match.id,
@@ -314,6 +340,8 @@ export function create34PlayerTestTournament(payload) {
       })),
       rounds: [],
     };
+    db.brackets[tournament.id] = initialBracket;
+    db.brackets[`${tournament.id}::${TEST_CATEGORY_ID}`] = initialBracket;
     return tournament;
   });
 }
@@ -348,6 +376,7 @@ export function simulatePreliminaryResults(tournamentId) {
 
     const bracket = buildDevTestBracketFromPreliminaries(db, tournament, prelimMatches);
     db.brackets[tournamentId] = bracket;
+    db.brackets[`${tournamentId}::${TEST_CATEGORY_ID}`] = bracket;
     tournament.testSimulationStatus = "Simulado";
     tournament.phases = ["Preliminar", "32avos", "16avos", "Octavos", "Cuartos", "Semifinal", "Final"];
     return { tournament, bracket };

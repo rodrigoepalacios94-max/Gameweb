@@ -40,6 +40,12 @@ export const mockDb = {
   settings: clone(mockSettings),
   auditLogs: [],
   operationalAlertReads: [],
+  matchAvailability: [
+    { matchId: "match-1", tournamentId: "tour-3", categoryId: "cat-m4", playerId: "player-1", confirmed: true, unavailableSlots: [], submittedAt: "2026-07-18T10:00:00.000Z" },
+    { matchId: "match-1", tournamentId: "tour-3", categoryId: "cat-m4", playerId: "player-2", confirmed: true, unavailableSlots: ["2026-07-19 12:00"], submittedAt: "2026-07-18T10:05:00.000Z" },
+    { matchId: "match-4", tournamentId: "tour-1", categoryId: "cat-m4", playerId: "player-2", confirmed: true, unavailableSlots: ["2026-08-08 12:00"], submittedAt: "2026-08-01T09:00:00.000Z" },
+  ],
+  scheduleEvents: [],
 };
 
 export function readMockData(selector) {

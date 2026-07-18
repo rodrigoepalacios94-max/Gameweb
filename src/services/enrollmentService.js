@@ -17,7 +17,6 @@ export const enrollmentService = {
           status: "Pendiente de pago",
           payment: "Pendiente",
           date: new Date().toISOString().slice(0, 10),
-          unavailableSlots: [],
           ...payload,
         };
         db.enrollments.push(enrollment);

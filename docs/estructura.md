@@ -142,8 +142,11 @@ Ejemplo:
 El sistema deberá detectar cuando ambas categorías se disputen el mismo día y advertir al jugador antes de confirmar la inscripción.
 
 3.7 Disponibilidad
-Durante la inscripción el jugador seleccionará los horarios en los cuales NO puede jugar.
-Posteriormente el algoritmo utilizará esta información para generar automáticamente el cronograma.
+La disponibilidad no se solicita durante la inscripción al torneo.
+Cada nuevo partido genera una solicitud de confirmación de asistencia.
+El jugador confirma que jugará ese partido e informa los días y horarios en los que NO puede jugar.
+La disponibilidad pertenece exclusivamente a ese partido o ronda futura.
+Todos los horarios no marcados se consideran potencialmente disponibles.
 
 3.8 Estado del jugador
 Un jugador podrá encontrarse en alguno de los siguientes estados:
@@ -422,8 +425,6 @@ Selecciona torneo.
 ↓
 Selecciona categoría.
 ↓
-Verifica disponibilidad.
-↓
 Realiza el pago.
 ↓
 Confirma inscripción.
@@ -431,12 +432,9 @@ Confirma inscripción.
 Recibe comprobante.
 
 7.3 Disponibilidad
-El jugador indicará únicamente los horarios donde NO puede jugar.
-Ejemplo:
-No puedo:
-•	Sábado 12 hs. 
-•	Domingo 9 hs. 
-El algoritmo utilizará esta información para el cronograma.
+La inscripción no incluye disponibilidad horaria.
+La disponibilidad se solicita antes de cada partido, cuando el sistema ya conoce que el jugador tiene una próxima ronda o partido pendiente.
+El jugador indica solamente los horarios donde NO puede jugar para ese partido específico.
 
 7.4 Doble categoría
 Si un jugador se inscribe en dos categorías, el sistema advertirá posibles conflictos. Posteriormente el cronograma intentará evitar superposiciones.
@@ -901,3 +899,413 @@ La prioridad del sistema será siempre:
 4.	Octavos. 
 5.	Preliminares. 
 Nunca deberá dejar una semifinal demasiado alejada de la final.
+
+
+Sí, entonces cambia bastante la definición del **ranking anual** y del **ascenso**. Te lo dejo completo de nuevo, listo para agregar a `docs/estructura.md`:
+
+```markdown
+## REGLAS DE W.O. Y CÓMPUTO DE RESULTADOS
+
+Cuando un partido se define por W.O. (Walkover), el resultado debe computarse automáticamente como un resultado deportivo de 6-0 / 6-0.
+
+### Jugador ganador por W.O.
+
+El jugador que gana el partido por W.O. debe registrar, a efectos de cálculos deportivos y estadísticos, el siguiente resultado:
+
+- Set 1: 6-0 a favor.
+- Set 2: 6-0 a favor.
+- Resultado computable: victoria 6-0 / 6-0.
+
+Este resultado debe utilizarse normalmente para todos los cálculos posteriores que dependan del rendimiento obtenido en el torneo.
+
+Por ejemplo, si el formato del torneo utiliza resultados previos para ordenar o clasificar jugadores, el ganador por W.O. debe ser considerado como si hubiera obtenido una victoria por 6-0 / 6-0.
+
+### Jugador perdedor por W.O.
+
+El jugador que pierde el partido por no presentarse debe registrar, a efectos de cálculos deportivos y estadísticos, el siguiente resultado:
+
+- Set 1: 0-6 en contra.
+- Set 2: 0-6 en contra.
+- Resultado computable: derrota 0-6 / 0-6.
+
+Este resultado debe afectar normalmente los cálculos posteriores que dependan del rendimiento obtenido.
+
+Por ejemplo, si después de una etapa preliminar es necesario ordenar a los jugadores perdedores para determinar cuáles clasifican directamente y cuáles deben disputar una ronda adicional, una derrota por W.O. debe computarse como 0-6 / 0-6 y, por lo tanto, posicionar al jugador entre los peores resultados según corresponda.
+
+La misma regla debe aplicarse en formatos de torneo por zonas cuando sea necesario calcular posiciones, rendimiento, games ganados, games perdidos u otros criterios derivados de los resultados.
+
+El W.O. debe quedar registrado explícitamente como W.O. en el historial y detalle del partido, aunque para los cálculos deportivos internos se compute como 6-0 / 6-0 a favor del ganador y 0-6 / 0-6 para el jugador que no se presentó.
+
+
+## CATEGORÍAS DE LOS JUGADORES
+
+Cada jugador debe tener asignada una categoría vigente.
+
+La categoría vigente representa la categoría mínima en la que el jugador puede competir normalmente.
+
+Durante el año, un jugador puede inscribirse y participar tanto en:
+
+- Su categoría vigente.
+- Categorías superiores a su categoría vigente.
+
+Esto permite que un jugador pueda competir durante el año en categorías superiores para probar su nivel y competir contra jugadores de mayor categoría.
+
+Un jugador no puede inscribirse libremente en una categoría inferior a su categoría vigente.
+
+
+## RANKING GLOBAL ANUAL
+
+GAME debe mantener un Ranking Global correspondiente al año deportivo en curso.
+
+El Ranking Global representa los puntos acumulados por los jugadores durante todos los torneos disputados a lo largo del año.
+
+Los jugadores comienzan cada nuevo año deportivo con 0 puntos.
+
+Al comenzar un nuevo año:
+
+- El Ranking Global del año anterior se cierra.
+- Los puntos utilizados para el Ranking Global activo se reinician a 0.
+- El nuevo Ranking Global comienza vacío.
+- Los jugadores que tienen 0 puntos no deben aparecer inicialmente en el Ranking Global.
+- Los jugadores comienzan a aparecer en el Ranking Global a medida que obtienen sus primeros puntos durante el nuevo año deportivo.
+
+Esto evita mostrar una clasificación artificial entre jugadores que todavía tienen todos 0 puntos y para los cuales no existe un criterio deportivo que permita establecer una posición real.
+
+Por lo tanto, al comenzar el año el Ranking Global no muestra ningún jugador.
+
+A medida que se disputan torneos y los jugadores obtienen puntos, comienzan a incorporarse automáticamente al Ranking Global y se ordenan según los puntos acumulados durante ese año.
+
+El Ranking Global debe representar exclusivamente la temporada o año deportivo vigente.
+
+
+## CIERRE ANUAL DEL RANKING Y ASCENSOS DE CATEGORÍA
+
+Al finalizar el año deportivo se debe cerrar el Ranking Global correspondiente a ese año.
+
+El jugador que finalice con la mayor cantidad de puntos en el Ranking Global de cada categoría debe ascender automáticamente a la categoría inmediatamente superior.
+
+El ascenso se determina utilizando la categoría vigente del jugador y su posición dentro del Ranking Global correspondiente a dicha categoría.
+
+Ejemplo:
+
+- Un jugador tiene como categoría vigente la Categoría 3.
+- Durante el año puede competir en Categoría 3 y también participar en torneos de Categoría 2 o categorías superiores.
+- Al finalizar el año, si es el jugador con mayor cantidad de puntos del Ranking Global correspondiente a su categoría, asciende automáticamente.
+- Su nueva categoría vigente pasa a ser Categoría 2.
+- A partir del nuevo año deportivo ya no puede volver a competir normalmente en Categoría 3.
+
+El ascenso modifica oficialmente la categoría vigente del jugador.
+
+Una vez aplicado el ascenso, el jugador comienza el nuevo año con:
+
+- Su nueva categoría vigente.
+- 0 puntos en el nuevo Ranking Global.
+- Sin posición visible en el Ranking Global hasta que obtenga sus primeros puntos del nuevo año.
+
+El Ranking Global del año anterior debe conservarse únicamente como historial, si el sistema dispone de una sección de temporadas o rankings históricos, pero sus puntos no deben trasladarse al Ranking Global del nuevo año.
+
+
+## PARTICIPACIÓN EN CATEGORÍAS SUPERIORES
+
+Durante el año, un jugador puede competir en categorías superiores a su categoría vigente sin que esto modifique automáticamente su categoría oficial.
+
+Ejemplo:
+
+Un jugador cuya categoría vigente es Categoría 3 puede:
+
+- Jugar torneos de Categoría 3.
+- Jugar torneos de Categoría 2.
+- Jugar torneos de Categoría 1, si corresponde según la jerarquía configurada.
+
+Participar en una categoría superior durante el año no implica automáticamente un cambio de categoría.
+
+La categoría vigente solo cambia mediante:
+
+- Ascenso automático al finalizar el año.
+- Descenso aprobado por el profesor/administrador.
+
+
+## SOLICITUD DE DESCENSO DE CATEGORÍA
+
+Si un jugador considera que debe regresar a una categoría inferior a su categoría vigente, debe realizar una solicitud formal de descenso de categoría desde el sistema.
+
+El descenso nunca debe realizarse automáticamente ni por decisión unilateral del jugador.
+
+La solicitud debe ser revisada por el profesor/administrador.
+
+Hasta que la solicitud sea aprobada:
+
+- El jugador mantiene su categoría vigente.
+- No puede inscribirse en categorías inferiores.
+- Puede continuar jugando en su categoría vigente o en categorías superiores.
+
+Si el profesor/administrador aprueba la solicitud:
+
+- Se actualiza la categoría vigente del jugador.
+- A partir de ese momento puede competir en la nueva categoría asignada.
+- El cambio debe quedar registrado en el historial del jugador.
+
+Si la solicitud es rechazada:
+
+- El jugador conserva su categoría vigente actual.
+
+
+## REGLA GENERAL DE PARTICIPACIÓN POR CATEGORÍA
+
+La validación de inscripción a un torneo siempre debe realizarse utilizando la categoría vigente del jugador al momento de la inscripción.
+
+El sistema debe permitir:
+
+- Categoría vigente: SÍ.
+- Categorías superiores: SÍ.
+- Categorías inferiores: NO, salvo que previamente exista una solicitud de descenso aprobada que haya actualizado oficialmente la categoría vigente del jugador.
+
+Los ascensos anuales deben procesarse al finalizar el año deportivo y antes del inicio efectivo de la nueva temporada.
+
+Después de procesar los ascensos:
+
+1. Se actualizan las categorías vigentes de los jugadores que correspondan.
+2. Se cierra el Ranking Global del año finalizado.
+3. Se inicia el nuevo Ranking Global con todos los jugadores en 0 puntos.
+4. El Ranking Global visible comienza vacío.
+5. Los jugadores se incorporan nuevamente al ranking a medida que obtienen puntos durante el nuevo año.
+```
+
+Así queda definido algo importante: **el ranking no se borra históricamente**, sino que se cierra el ranking de 2026, por ejemplo, y el **ranking activo 2027 arranca vacío**. Eso después nos permite tener historial de campeones y posiciones anuales sin mezclar los puntos entre temporadas.
+
+
+## TORNEOS POR CATEGORIA Y PROGRAMACION DINAMICA
+
+### Torneo dividido por categorias
+
+Un torneo puede incluir multiples categorias, pero cada categoria funciona internamente como una competencia independiente.
+
+Cada categoria participante debe tener:
+
+- Sus propios participantes.
+- Su propio formato deportivo.
+- Sus propios partidos.
+- Sus propias preliminares si corresponde.
+- Sus propias zonas si corresponde.
+- Su propia llave.
+- Su propia clasificacion.
+- Su propia final.
+
+No debe existir una unica llave mezclando jugadores de diferentes categorias.
+
+Las categorias comparten el torneo, fechas generales, dia de finales, infraestructura, canchas y horarios disponibles.
+No comparten cuadro, participantes, partidos ni formato deportivo interno.
+
+### Seleccion de categorias y formatos
+
+Al crear un torneo, el profesor selecciona las categorias participantes. Debe poder seleccionar categorias individualmente, seleccionar todas y deseleccionar todas.
+
+Las categorias seleccionadas son las unicas habilitadas para recibir inscripciones.
+
+El formato deportivo se decide por categoria, no necesariamente para todo el torneo.
+El flujo correcto es:
+
+1. Crear torneo.
+2. Seleccionar categorias participantes.
+3. Abrir inscripciones.
+4. Recibir inscripciones.
+5. Cerrar inscripciones.
+6. Mostrar cantidad de jugadores por categoria.
+7. Seleccionar formato por categoria.
+
+Los formatos disponibles por categoria son:
+
+- Preliminar.
+- Zonas.
+- Eliminacion Directa.
+
+Si una categoria usa Preliminar, solo participan los jugadores de esa categoria en sus preliminares, ranking preliminar y llave.
+Si usa Zonas, el profesor configura posteriormente cantidad de zonas, distribucion y clasificados.
+Si usa Eliminacion Directa, se genera solo la llave de esa categoria respetando cabezas de serie.
+
+### Detalle de torneo por categoria
+
+El detalle del torneo debe tener un selector claro de categoria.
+
+Al seleccionar una categoria, se muestran datos especificos de esa categoria:
+
+- Cuadro.
+- Partidos.
+- Participantes.
+- Resumen.
+- Disciplina.
+- Programacion.
+
+La seccion principal debe ser Cuadro cuando exista.
+Cada categoria conserva su propio estado y su propia llave.
+
+### Confirmacion de asistencia por partido
+
+La disponibilidad del jugador no es global y no se informa durante la inscripcion.
+
+Cuando GAME determina que un jugador tiene un proximo partido, debe solicitar:
+
+CONFIRMAR ASISTENCIA
+
+El jugador debe:
+
+1. Confirmar que disputara el partido.
+2. Informar dias y horarios en los que NO puede jugar.
+
+Todos los horarios no marcados se consideran potencialmente disponibles.
+
+La disponibilidad pertenece al partido/ronda futura especifica.
+Cada nuevo partido requiere una nueva confirmacion.
+
+### Rival pendiente
+
+Si un jugador ya clasifico a una siguiente ronda pero el rival todavia no esta definido, puede confirmar asistencia igualmente.
+
+La interfaz debe mostrar:
+
+- Ronda correspondiente.
+- Rival: A definir.
+
+Cuando se define el segundo jugador, se conserva la disponibilidad ya enviada por el primero y se solicita asistencia al nuevo rival.
+Cuando ambos jugadores confirmaron asistencia, GAME puede buscar un horario compatible.
+
+### Generacion del proximo partido
+
+Cuando el profesor finaliza un partido:
+
+- Si el ganador ya tiene rival definido, se habilita el siguiente partido y ambos jugadores reciben solicitud de asistencia.
+- Si el rival todavia no esta definido, se habilita el partido futuro con rival A definir para que el ganador pueda informar disponibilidad.
+- Cuando el rival se define, el partido se completa y se solicita disponibilidad al nuevo jugador.
+
+La disponibilidad solo decide fecha, horario y cancha.
+Nunca modifica rival, ronda ni estructura de la llave.
+
+### Programacion automatica
+
+GAME debe intentar ubicar los partidos pendientes dentro del calendario disponible considerando:
+
+- Confirmacion de asistencia.
+- Disponibilidad de ambos jugadores.
+- Horario.
+- Cancha disponible.
+- Ronda.
+- Categoria.
+- Descanso necesario.
+- Participacion en multiples categorias.
+- Fechas objetivo.
+- Semifinales.
+- Finales.
+
+Si un partido no puede jugarse un fin de semana, se intenta programar en el siguiente.
+
+### Canchas compartidas y distribucion proporcional
+
+Las canchas son recursos compartidos entre categorias.
+No se asigna una cancha fija a una categoria.
+
+La distribucion debe ser dinamica y proporcional segun partidos pendientes.
+
+Formula conceptual:
+
+pesoCategoria = partidosPendientesCategoria / totalPartidosPendientes
+
+Ese peso define aproximadamente que porcentaje de turnos disponibles recibe cada categoria.
+
+Distribuir parejo significa permitir que cada categoria avance proporcionalmente segun su volumen, no dar la misma cantidad de partidos a todas.
+
+Tambien debe considerarse el atraso:
+
+- Carga pendiente.
+- Porcentaje de avance.
+- Ronda actual.
+- Cercania de semifinal.
+- Cercania de final.
+
+Una categoria pequena no debe quedar detenida solo porque otra tenga mas participantes.
+
+### Prioridad de rondas finales
+
+La prioridad temporal es:
+
+1. Final.
+2. Semifinal.
+3. Cuartos.
+4. Octavos.
+5. Rondas iniciales.
+6. Preliminares.
+
+Si hay que retrasar partidos, se retrasan primero las rondas iniciales.
+Debe evitarse una separacion excesiva entre semifinal y final.
+
+El profesor puede definir fecha objetivo de semifinal y dia de finales.
+GAME debe intentar respetarlas.
+Si por lluvia, suspensiones, retrasos acumulados o falta real de capacidad es imposible llegar al dia de finales original, la final puede desplazarse y el profesor debe ser informado.
+
+### Suspension y reprogramacion
+
+El profesor puede suspender:
+
+- Un partido individual.
+- Una jornada completa.
+- Un fin de semana completo.
+- Los partidos restantes de un dia desde una hora determinada.
+
+Al suspender un partido:
+
+- Se solicita motivo.
+- El partido pasa a Suspendido.
+- Se retira del horario actual.
+- GAME intenta reprogramarlo para el siguiente fin de semana disponible.
+- El turno liberado puede ser ocupado por otro partido elegible.
+
+Al suspender una jornada o fin de semana:
+
+- No se mueven partidos ya finalizados.
+- Los partidos pendientes se recalculan.
+- La reprogramacion no es un cambio ciego de fecha; vuelve a considerar disponibilidad, categorias, peso proporcional, rondas, fechas objetivo, canchas y horarios.
+
+### Capacidad de canchas
+
+Para esta version mock:
+
+- Sabado: 3 canchas.
+- Domingo: 4 canchas.
+
+Las canchas son compartidas y pueden cambiar de categoria en cada turno.
+
+### Vista administrativa de programacion
+
+La vista administrativa debe permitir ver programacion por:
+
+- Fin de semana.
+- Sabado y domingo.
+- Turno.
+- Cancha.
+
+Cada tarjeta de partido debe mostrar:
+
+- Categoria.
+- Ronda.
+- Jugadores.
+- Estado.
+
+Debe incluir una seccion de distribucion por categoria, por ejemplo:
+
+- 1a Masculino: 12 de 38 partidos pendientes programados.
+- 2a Masculino: 6 de 20.
+- 3a Femenino: 3 de 10.
+
+No es necesario mostrar formulas internas en la interfaz.
+
+### Recalculo
+
+La accion Recalcular programacion vuelve a ejecutar la logica mock considerando:
+
+- Nuevas disponibilidades.
+- Suspensiones.
+- Partidos finalizados.
+- Categorias.
+- Carga proporcional.
+- Prioridad de rondas.
+
+No modifica resultados ya cargados.
