@@ -21,7 +21,7 @@ function getScoreParts(score = "") {
   };
 }
 
-export function BracketMatch({ match, detailBasePath = "/player/matches", compact = false }) {
+export function BracketMatch({ match, detailBasePath = "/player/matches", compact = false, onOpen }) {
   const scores = getScoreParts(match.score);
   const playerANote = getCompactNote(match.playerANote);
   const playerBNote = getCompactNote(match.playerBNote);
@@ -41,6 +41,14 @@ export function BracketMatch({ match, detailBasePath = "/player/matches", compac
       {!scores ? <Badge tone={match.walkover ? "warning" : match.bye ? "neutral" : match.winner ? "success" : "info"}>{match.score}</Badge> : null}
     </>
   );
+
+  if (match.matchId && onOpen) {
+    return (
+      <button className={matchClassName} type="button" title={match.connectionNote || undefined} onClick={() => onOpen(match.matchId)}>
+        {content}
+      </button>
+    );
+  }
 
   if (match.matchId) {
     return (

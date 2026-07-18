@@ -12,7 +12,7 @@ import { adminService } from "../../services/adminService";
 import { categoryService } from "../../services/categoryService";
 import { tournamentService } from "../../services/tournamentService";
 import { formatDate } from "../../utils/formatters";
-import { DEFAULT_MATCH_FORMAT, MATCH_FORMAT_OPTIONS, describeMatchFormat } from "../../utils/matchFormat";
+import { DEFAULT_MATCH_FORMAT, describeMatchFormat } from "../../utils/matchFormat";
 
 const steps = [
   { id: "general", label: "General" },
@@ -237,14 +237,10 @@ export function AdminTournamentCreatePage() {
               </div>
               <div className="form-grid">
                 <label>Cantidad de sets
-                  <select value={form.matchFormat.bestOfSets} onChange={(event) => updateMatchFormat("bestOfSets", Number(event.target.value))}>
-                    {MATCH_FORMAT_OPTIONS.bestOfSets.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
+                  <input type="number" min="1" step="2" value={form.matchFormat.bestOfSets || ""} onChange={(event) => updateMatchFormat("bestOfSets", event.target.value === "" ? "" : Number(event.target.value))} />
                 </label>
                 <label>Games por set
-                  <select value={form.matchFormat.gamesPerSet} onChange={(event) => updateMatchFormat("gamesPerSet", Number(event.target.value))}>
-                    {MATCH_FORMAT_OPTIONS.gamesPerSet.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
+                  <input type="number" min="1" value={form.matchFormat.gamesPerSet || ""} onChange={(event) => updateMatchFormat("gamesPerSet", event.target.value === "" ? "" : Number(event.target.value))} />
                 </label>
                 <label>Super Tie-Break
                   <select value={form.matchFormat.useSuperTiebreak ? "yes" : "no"} onChange={(event) => updateMatchFormat("useSuperTiebreak", event.target.value === "yes")}>
@@ -252,15 +248,14 @@ export function AdminTournamentCreatePage() {
                     <option value="no">No</option>
                   </select>
                 </label>
-                {form.matchFormat.useSuperTiebreak ? (
-                  <label>Set decisivo
-                    <select value={form.matchFormat.superTiebreakInDecidingSet ? "deciding" : "none"} onChange={(event) => updateMatchFormat("superTiebreakInDecidingSet", event.target.value === "deciding")}>
-                      <option value="deciding">En lugar del set decisivo</option>
-                      <option value="none">No reemplaza ningun set</option>
-                    </select>
-                  </label>
-                ) : null}
               </div>
+              {form.matchFormat.useSuperTiebreak ? (
+                <label className={form.matchFormat.superTiebreakInDecidingSet ? "check-pill is-selected match-format-toggle" : "check-pill match-format-toggle"}>
+                  <input type="checkbox" checked={Boolean(form.matchFormat.superTiebreakInDecidingSet)} onChange={(event) => updateMatchFormat("superTiebreakInDecidingSet", event.target.checked)} />
+                  <strong>Reemplaza al set decisivo</strong>
+                  <span>Si esta activo, el ultimo set se carga como Super Tie-Break.</span>
+                </label>
+              ) : null}
             </section>
           </div>
         ) : null}
@@ -305,7 +300,8 @@ export function AdminTournamentCreatePage() {
             <SummarySection title="Formato de partido" icon={Trophy}>
               <span>Sets: {describeMatchFormat(form.matchFormat).sets}</span>
               <span>Games por set: {form.matchFormat.gamesPerSet}</span>
-              <span>Set decisivo: {describeMatchFormat(form.matchFormat).decidingSet}</span>
+              <span>Super Tie-Break: {form.matchFormat.useSuperTiebreak ? "Si" : "No"}</span>
+              {form.matchFormat.useSuperTiebreak ? <span>Set decisivo: {form.matchFormat.superTiebreakInDecidingSet ? "Super Tie-Break" : "Set normal"}</span> : null}
             </SummarySection>
             <SummarySection title="Categorias" icon={UsersRound}>
               {selectedCategoryNames.length ? selectedCategoryNames.map((name) => <span key={name}>{name}</span>) : <span>Sin categorias seleccionadas</span>}

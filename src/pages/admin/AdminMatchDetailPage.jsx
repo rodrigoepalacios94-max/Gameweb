@@ -165,6 +165,7 @@ export function AdminMatchDetailPage() {
             <span>Cancha: {match.court}</span>
             <span>Ganador: {winnerName}</span>
             <span>Resultado: {match.result || "Pendiente"}</span>
+            {match.earlyFinishReason || match.resultDetail?.earlyFinishReason ? <span>Finalizacion anticipada: {match.earlyFinishReason || match.resultDetail.earlyFinishReason}</span> : null}
           </div>
         </Card>
         <Card>

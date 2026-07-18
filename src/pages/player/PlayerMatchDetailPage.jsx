@@ -72,6 +72,7 @@ export function PlayerMatchDetailPage() {
             <span>Cancha: {match.court}</span>
             {winnerName ? <span>Ganador: {winnerName}</span> : <span>Ganador: pendiente</span>}
             {walkoverName ? <span>W.O.: {walkoverName}</span> : null}
+            {match.earlyFinishReason || match.resultDetail?.earlyFinishReason ? <span>Finalizacion anticipada: {match.earlyFinishReason || match.resultDetail.earlyFinishReason}</span> : null}
             {match.pointsEarned ? <span>Puntos obtenidos: +{match.pointsEarned}</span> : null}
           </div>
         </Card>

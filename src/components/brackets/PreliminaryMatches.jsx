@@ -3,7 +3,7 @@ import { Play } from "lucide-react";
 import { Badge } from "../common/Badge";
 import { Button } from "../common/Button";
 
-export function PreliminaryMatches({ preliminaries = [], title = "Preliminares", detailBasePath = "/player/matches", actionLabel, actionDisabled = false, onAction }) {
+export function PreliminaryMatches({ preliminaries = [], title = "Preliminares", detailBasePath = "/player/matches", actionLabel, actionDisabled = false, onAction, onMatchOpen }) {
   if (!preliminaries.length) return null;
 
   return (
@@ -18,8 +18,12 @@ export function PreliminaryMatches({ preliminaries = [], title = "Preliminares",
       </div>
       <div className="preliminary-grid preliminary-grid--compact">
         {preliminaries.map((match, index) => {
-          const CardComponent = match.matchId ? Link : "div";
-          const cardProps = match.matchId ? { to: `${detailBasePath}/${match.matchId}` } : {};
+          const CardComponent = match.matchId && !onMatchOpen ? Link : match.matchId ? "button" : "div";
+          const cardProps = match.matchId && onMatchOpen
+            ? { type: "button", onClick: () => onMatchOpen(match.matchId) }
+            : match.matchId
+              ? { to: `${detailBasePath}/${match.matchId}` }
+              : {};
           return (
             <CardComponent key={match.matchId || `${match.playerA}-${match.playerB}-${index}`} className="preliminary-card preliminary-card--compact" {...cardProps}>
               <strong>{match.playerA}</strong>

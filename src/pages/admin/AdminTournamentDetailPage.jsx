@@ -11,6 +11,7 @@ import { LoadingState } from "../../components/common/LoadingState";
 import { Tabs } from "../../components/common/Tabs";
 import { PreliminaryMatches } from "../../components/brackets/PreliminaryMatches";
 import { TournamentBracket } from "../../components/brackets/TournamentBracket";
+import { MatchResultModal } from "../../components/matches/MatchResultModal";
 import { useAsyncData } from "../../hooks/useAsyncData";
 import { adminService } from "../../services/adminService";
 import { disciplineService } from "../../services/disciplineService";
@@ -23,7 +24,8 @@ import { formatCurrency, formatDate } from "../../utils/formatters";
 export function AdminTournamentDetailPage() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
-  const [tab, setTab] = useState(() => searchParams.get("tab") || "summary");
+  const [tab, setTab] = useState(() => searchParams.get("tab") || "bracket");
+  const [selectedMatchId, setSelectedMatchId] = useState(null);
   const { data, loading, error, reload } = useAsyncData(async () => {
     const [tournament, matches, bracket, registrations, schedule, participants, categories, claims, players] = await Promise.all([
       tournamentService.getTournamentById(id),
@@ -49,14 +51,14 @@ export function AdminTournamentDetailPage() {
   }
 
   const tabs = [
-    { id: "summary", label: "Resumen" },
-    { id: "registrations", label: "Inscripciones" },
-    { id: "participants", label: "Participantes" },
-    { id: "schedule", label: "Programacion" },
-    { id: "matches", label: "Partidos" },
     ...(tournament.type === "Zonas" ? [{ id: "zones", label: "Zonas" }] : [{ id: "bracket", label: "Cuadro" }]),
+    { id: "matches", label: "Partidos" },
+    { id: "participants", label: "Participantes" },
+    { id: "summary", label: "Resumen" },
     { id: "discipline", label: "Disciplina" },
   ];
+  const defaultTab = tournament.type === "Zonas" ? "zones" : "bracket";
+  const activeTab = tabs.some((item) => item.id === tab) ? tab : defaultTab;
 
   async function simulatePreliminaries() {
     await tournamentService.simulateTestPreliminaries(tournament.id);
@@ -81,9 +83,9 @@ export function AdminTournamentDetailPage() {
         </div>
       </header>
 
-      <Tabs tabs={tabs} activeTab={tab} onChange={setTab} />
+      <Tabs tabs={tabs} activeTab={activeTab} onChange={setTab} />
 
-      {tab === "summary" ? (
+      {activeTab === "summary" ? (
         <div className="detail-grid">
           <Card>
             <h2>Datos principales</h2>
@@ -115,7 +117,7 @@ export function AdminTournamentDetailPage() {
         </div>
       ) : null}
 
-      {tab === "registrations" ? (
+      {activeTab === "registrations" ? (
         <Card>
           <div className="section-title">
             <span>Inscripciones</span>
@@ -143,7 +145,7 @@ export function AdminTournamentDetailPage() {
         </Card>
       ) : null}
 
-      {tab === "participants" ? (
+      {activeTab === "participants" ? (
         <Card>
           <div className="section-title">
             <span>Participantes</span>
@@ -163,7 +165,7 @@ export function AdminTournamentDetailPage() {
         </Card>
       ) : null}
 
-      {tab === "schedule" ? (
+      {activeTab === "schedule" ? (
         <Card>
           <h2>Programacion inteligente mock</h2>
           <p className="muted">El profesor define fechas clave, canchas y turnos. GAME distribuye visualmente, pero toda programacion puede modificarse manualmente.</p>
@@ -186,22 +188,22 @@ export function AdminTournamentDetailPage() {
         </Card>
       ) : null}
 
-      {tab === "matches" ? (
+      {activeTab === "matches" ? (
         <Card>
           <h2>Partidos del torneo</h2>
           <div className="table-list">
             {matches.map((match) => (
-              <Link key={match.id} className="tournament-match-row" to={`/admin/matches/${match.id}`}>
+              <button key={match.id} className="tournament-match-row" type="button" onClick={() => setSelectedMatchId(match.id)}>
                 <span>{match.round}</span>
                 <strong>{match.playerA} vs {match.playerB}</strong>
                 <Badge tone={match.status === "Finalizado" ? "success" : match.status === "W.O." ? "warning" : "info"}>{match.status}</Badge>
-              </Link>
+              </button>
             ))}
           </div>
         </Card>
       ) : null}
 
-      {tab === "bracket" ? (
+      {activeTab === "bracket" ? (
         <Card className="bracket-card">
           <div className="section-title">
             <span>Cuadro / llave</span>
@@ -218,16 +220,16 @@ export function AdminTournamentDetailPage() {
               </Button>
             </div>
           ) : null}
-          <PreliminaryMatches preliminaries={bracket?.preliminaries || []} detailBasePath="/admin/matches" />
+          <PreliminaryMatches preliminaries={bracket?.preliminaries || []} detailBasePath="/admin/matches" onMatchOpen={setSelectedMatchId} />
           {bracket?.rounds?.length ? (
-            <TournamentBracket bracket={bracket} detailBasePath="/admin/matches" />
+            <TournamentBracket bracket={bracket} detailBasePath="/admin/matches" onMatchOpen={setSelectedMatchId} />
           ) : (
             <EmptyState title="Cuadro pendiente" description="La llave todavia no fue generada para este torneo mock." />
           )}
         </Card>
       ) : null}
 
-      {tab === "zones" ? (
+      {activeTab === "zones" ? (
         <Card>
           <h2>Zonas</h2>
           <div className="zone-grid">
@@ -245,7 +247,7 @@ export function AdminTournamentDetailPage() {
         </Card>
       ) : null}
 
-      {tab === "discipline" ? (
+      {activeTab === "discipline" ? (
         <Card>
           <div className="section-title">
             <span>Disciplina del torneo</span>
@@ -263,6 +265,12 @@ export function AdminTournamentDetailPage() {
           </div>
         </Card>
       ) : null}
+      <MatchResultModal
+        open={Boolean(selectedMatchId)}
+        matchId={selectedMatchId}
+        onClose={() => setSelectedMatchId(null)}
+        onSaved={reload}
+      />
     </div>
   );
 }

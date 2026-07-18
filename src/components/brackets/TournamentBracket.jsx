@@ -3,11 +3,11 @@ import { ChevronLeft, ChevronRight, Crosshair } from "lucide-react";
 import { Button } from "../common/Button";
 import { BracketMatch } from "./BracketMatch";
 
-const ROUND_WIDTH = 196;
-const ROUND_GAP = 58;
-const BRACKET_HEIGHT = 560;
-const MATCH_HEIGHT = 56;
-const HEADER_HEIGHT = 38;
+const ROUND_WIDTH = 260;
+const ROUND_GAP = 86;
+const BRACKET_HEIGHT = 720;
+const MATCH_HEIGHT = 78;
+const HEADER_HEIGHT = 44;
 
 const ROUND_KEYS = [
   { key: "round32", label: "32avos", names: ["32avos", "round-32"] },
@@ -115,7 +115,7 @@ function connectionPath(connection) {
   return `M ${connection.from.x} ${connection.from.y} H ${midX} V ${connection.to.y} H ${connection.to.x}`;
 }
 
-export function TournamentBracket({ bracket, detailBasePath = "/admin/matches" }) {
+export function TournamentBracket({ bracket, detailBasePath = "/admin/matches", onMatchOpen }) {
   const scrollRef = useRef(null);
   const dragState = useRef({ active: false, startX: 0, scrollLeft: 0, moved: false });
   const [dragging, setDragging] = useState(false);
@@ -262,7 +262,7 @@ export function TournamentBracket({ bracket, detailBasePath = "/admin/matches" }
               <div className="bracket-round-lane">
                 {column.positions.map((position) => (
                   <div key={position.match.id} className="bracket-match-slot" style={{ top: `${position.top}px` }}>
-                    <BracketMatch match={position.match} detailBasePath={detailBasePath} compact />
+                    <BracketMatch match={position.match} detailBasePath={detailBasePath} compact onOpen={onMatchOpen} />
                   </div>
                 ))}
               </div>

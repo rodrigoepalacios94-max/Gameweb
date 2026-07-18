@@ -1,8 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { CalendarDays, GitBranch, ListFilter, Trophy } from "lucide-react";
+import { CalendarDays, GitBranch, ListFilter } from "lucide-react";
 import { Badge } from "../../components/common/Badge";
-import { Button } from "../../components/common/Button";
 import { EmptyState } from "../../components/common/EmptyState";
 import { ErrorState } from "../../components/common/ErrorState";
 import { LoadingState } from "../../components/common/LoadingState";
@@ -85,14 +84,6 @@ export function PlayerTournamentsPage() {
       ) : (
         <EmptyState title="No hay torneos para este filtro" description="Cambia el filtro para ver otras competencias del circuito." />
       )}
-
-      <section className="info-band">
-        <Trophy size={22} />
-        <p>
-          Las inscripciones usan datos mock. La regla visual respeta tu categoria actual y categorias superiores; la integracion de pago real queda para una etapa posterior.
-        </p>
-        <Button variant="ghost">Ver reglamento</Button>
-      </section>
     </div>
   );
 }

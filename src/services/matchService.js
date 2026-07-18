@@ -79,6 +79,47 @@ export function calculateMatchWinner({ playerAId, playerBId, sets = [], matchFor
   };
 }
 
+function getCompletedSets(sets = [], matchFormat = DEFAULT_MATCH_FORMAT) {
+  return sets
+    .filter((set) => set.playerAScore !== "" && set.playerAScore != null && set.playerBScore !== "" && set.playerBScore != null)
+    .map((set, index) => normalizeScoreSet(set, index, matchFormat));
+}
+
+function calculateRelaxedSetScore(sets = []) {
+  return sets.reduce((score, set) => {
+    if (!Number.isFinite(set.playerAScore) || !Number.isFinite(set.playerBScore) || set.playerAScore === set.playerBScore) return score;
+    if (set.playerAScore > set.playerBScore) return { ...score, playerASets: score.playerASets + 1 };
+    return { ...score, playerBSets: score.playerBSets + 1 };
+  }, { playerASets: 0, playerBSets: 0 });
+}
+
+function buildEarlyFinishResult(target, sets, matchFormat, earlyFinishReason, manualWinnerId) {
+  const completedSets = getCompletedSets(sets, matchFormat);
+  const strictResult = calculateMatchWinner({ ...target, sets: completedSets, matchFormat });
+  const relaxedScore = calculateRelaxedSetScore(completedSets);
+  const selectedWinnerId = strictResult.valid ? strictResult.winnerId : manualWinnerId;
+  const validWinnerIds = [target.playerAId, target.playerBId];
+
+  if (!earlyFinishReason?.trim()) {
+    throw new Error("Indica el motivo de finalizacion anticipada.");
+  }
+  if (!validWinnerIds.includes(selectedWinnerId)) {
+    throw new Error("Selecciona el ganador del partido finalizado anticipadamente.");
+  }
+
+  return {
+    valid: true,
+    completedEarly: true,
+    earlyFinishReason: earlyFinishReason.trim(),
+    manualWinnerId: strictResult.valid ? null : selectedWinnerId,
+    sets: completedSets,
+    playerASets: strictResult.valid ? strictResult.playerASets : relaxedScore.playerASets,
+    playerBSets: strictResult.valid ? strictResult.playerBSets : relaxedScore.playerBSets,
+    winnerId: selectedWinnerId,
+    loserId: selectedWinnerId === target.playerAId ? target.playerBId : target.playerAId,
+  };
+}
+
 function playerPayload(match, side) {
   return side === "A"
     ? { id: match.playerAId, name: match.playerA, avatar: match.playerAAvatar }
@@ -228,17 +269,25 @@ function maybeBuildDevBracket(db, match) {
   tournament.phases = ["Preliminar", "32avos", "16avos", "Octavos", "Cuartos", "Semifinal", "Final"];
 }
 
-function applyFinalResult(db, id, sets, actor, action) {
+function applyFinalResult(db, id, payload, actor, action) {
   const target = db.matches.find((item) => item.id === id);
   if (!target) return null;
   const tournament = getTournament(db, target.tournamentId);
   const matchFormat = normalizeMatchFormat(tournament?.matchFormat || DEFAULT_MATCH_FORMAT);
-  const result = calculateMatchWinner({ ...target, sets, matchFormat });
+  const {
+    sets = [],
+    completedEarly = false,
+    earlyFinishReason = "",
+    manualWinnerId = null,
+  } = Array.isArray(payload) ? { sets: payload } : payload || {};
+  const result = completedEarly
+    ? buildEarlyFinishResult(target, sets, matchFormat, earlyFinishReason, manualWinnerId)
+    : calculateMatchWinner({ ...target, sets, matchFormat });
   if (!result.valid) {
     throw new Error(result.error);
   }
 
-  const resultText = formatResultSets(result.sets);
+  const resultText = result.sets.length ? formatResultSets(result.sets) : "Finalizacion anticipada";
   Object.assign(target, {
     status: "Finalizado",
     result: resultText,
@@ -248,10 +297,15 @@ function applyFinalResult(db, id, sets, actor, action) {
       loserId: result.loserId,
       playerASets: result.playerASets,
       playerBSets: result.playerBSets,
+      completedEarly: Boolean(result.completedEarly),
+      earlyFinishReason: result.earlyFinishReason || null,
+      manualWinnerId: result.manualWinnerId || null,
     },
     sets: result.sets,
     winnerId: result.winnerId,
     loserId: result.loserId,
+    completedEarly: Boolean(result.completedEarly),
+    earlyFinishReason: result.earlyFinishReason || null,
     walkoverPlayerId: null,
   });
   if (target.phase === "Preliminar") {
@@ -307,10 +361,10 @@ export const matchService = {
       return match;
     }, "No pudimos guardar el parcial.");
   },
-  async finalizeMatch(id, { sets = [] }, actor = "admin-1") {
+  async finalizeMatch(id, payload = {}, actor = "admin-1") {
     return mockRequest(async () => {
       const applied = mutateMockData((db) => {
-        const result = applyFinalResult(db, id, sets, actor, "finalize_match");
+        const result = applyFinalResult(db, id, payload, actor, "finalize_match");
         return result ? withTournamentFormat(db, result.match) : null;
       });
       await auditService.record({
@@ -323,10 +377,10 @@ export const matchService = {
       return applied;
     }, "No pudimos finalizar el partido.");
   },
-  async editResult(id, { sets = [] }, actor = "admin-1") {
+  async editResult(id, payload = {}, actor = "admin-1") {
     return mockRequest(async () => {
       const applied = mutateMockData((db) => {
-        const result = applyFinalResult(db, id, sets, actor, "edit_result");
+        const result = applyFinalResult(db, id, payload, actor, "edit_result");
         return result ? withTournamentFormat(db, result.match) : null;
       });
       await auditService.record({
