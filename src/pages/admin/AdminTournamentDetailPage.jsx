@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { CalendarDays, CreditCard, GitBranch, ShieldAlert, UsersRound } from "lucide-react";
+import { ArrowLeft, CalendarDays, CreditCard, GitBranch, ShieldAlert, UsersRound } from "lucide-react";
 import { Avatar } from "../../components/common/Avatar";
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
@@ -68,6 +68,11 @@ export function AdminTournamentDetailPage() {
 
   return (
     <div className="page-stack">
+      <Link className="back-link" to="/admin/tournaments">
+        <ArrowLeft size={18} />
+        <span>Volver a torneos</span>
+      </Link>
+
       <header className="detail-hero tournament-detail-hero">
         <div>
           <span className="eyebrow">{tournament.scoringSystem}</span>

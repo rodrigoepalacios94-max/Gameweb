@@ -82,6 +82,7 @@ export function AdminTournamentCreatePage() {
 
   const { settings, categories } = data;
   const activeCategories = categories.filter((category) => category.status === "Activa");
+  const activeCategoryIds = activeCategories.map((category) => category.id);
   const saturdayError = hasDuplicatedTimes(schedule.saturday);
   const sundayError = hasDuplicatedTimes(schedule.sunday);
   const selectedCategoryNames = categories
@@ -108,6 +109,14 @@ export function AdminTournamentCreatePage() {
     setSelectedCategories((current) =>
       current.includes(categoryId) ? current.filter((item) => item !== categoryId) : [...current, categoryId],
     );
+  }
+
+  function selectAllCategories() {
+    setSelectedCategories(activeCategoryIds);
+  }
+
+  function clearAllCategories() {
+    setSelectedCategories([]);
   }
 
   function updateTime(day, index, value) {
@@ -208,14 +217,23 @@ export function AdminTournamentCreatePage() {
         ) : null}
 
         {activeStep === "categories" ? (
-          <div className="badge-cloud badge-cloud--wide">
-            {activeCategories.map((category) => (
-              <label key={category.id} className={selectedCategories.includes(category.id) ? "check-pill is-selected" : "check-pill"}>
-                <input type="checkbox" checked={selectedCategories.includes(category.id)} onChange={() => toggleCategory(category.id)} />
-                <strong>{category.name} {category.branch}</strong>
-                <span>Nivel {category.level} / {category.status}</span>
-              </label>
-            ))}
+          <div className="page-stack compact">
+            <div className="bulk-actions">
+              <span>{selectedCategories.length}/{activeCategories.length} categorias seleccionadas</span>
+              <div className="card-actions">
+                <Button variant="outline-green" size="sm" onClick={selectAllCategories}>Seleccionar todas</Button>
+                <Button variant="ghost" size="sm" onClick={clearAllCategories}>Deseleccionar todas</Button>
+              </div>
+            </div>
+            <div className="badge-cloud badge-cloud--wide">
+              {activeCategories.map((category) => (
+                <label key={category.id} className={selectedCategories.includes(category.id) ? "check-pill is-selected" : "check-pill"}>
+                  <input type="checkbox" checked={selectedCategories.includes(category.id)} onChange={() => toggleCategory(category.id)} />
+                  <strong>{category.name} {category.branch}</strong>
+                  <span>Nivel {category.level} / {category.status}</span>
+                </label>
+              ))}
+            </div>
           </div>
         ) : null}
 
@@ -249,13 +267,6 @@ export function AdminTournamentCreatePage() {
                   </select>
                 </label>
               </div>
-              {form.matchFormat.useSuperTiebreak ? (
-                <label className={form.matchFormat.superTiebreakInDecidingSet ? "check-pill is-selected match-format-toggle" : "check-pill match-format-toggle"}>
-                  <input type="checkbox" checked={Boolean(form.matchFormat.superTiebreakInDecidingSet)} onChange={(event) => updateMatchFormat("superTiebreakInDecidingSet", event.target.checked)} />
-                  <strong>Reemplaza al set decisivo</strong>
-                  <span>Si esta activo, el ultimo set se carga como Super Tie-Break.</span>
-                </label>
-              ) : null}
             </section>
           </div>
         ) : null}

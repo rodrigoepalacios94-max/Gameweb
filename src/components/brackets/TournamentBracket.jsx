@@ -5,8 +5,8 @@ import { BracketMatch } from "./BracketMatch";
 
 const ROUND_WIDTH = 260;
 const ROUND_GAP = 86;
-const BRACKET_HEIGHT = 720;
-const MATCH_HEIGHT = 78;
+const BRACKET_HEIGHT = 920;
+const MATCH_HEIGHT = 92;
 const HEADER_HEIGHT = 44;
 
 const ROUND_KEYS = [

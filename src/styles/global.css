@@ -31,6 +31,8 @@
   --space-8: 2rem;
   --space-10: 2.5rem;
   --max-content: 1540px;
+  --cursor-game: url("../assets/cursor-game.svg") 6 5, auto;
+  --cursor-game-pointer: url("../assets/cursor-game-pointer.svg") 6 5, pointer;
 }
 
 * {
@@ -53,6 +55,35 @@ body {
     linear-gradient(180deg, #08090b 0%, #0c0f13 48%, #070809 100%);
   color: var(--color-text);
   font-family: Inter, Manrope, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  body {
+    cursor: var(--cursor-game);
+  }
+
+  a,
+  button,
+  [role="button"],
+  .button,
+  .tabs button,
+  .category-option,
+  .check-pill,
+  .preliminary-card--compact,
+  .tournament-match-row,
+  .bracket-match {
+    cursor: var(--cursor-game-pointer);
+  }
+
+  input,
+  textarea {
+    cursor: text;
+  }
+
+  select,
+  label {
+    cursor: auto;
+  }
 }
 
 button,
@@ -1198,21 +1229,22 @@ img {
 .bracket-scroll {
   width: 100%;
   max-width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: var(--space-2) 0 var(--space-4);
+  max-height: min(78vh, 860px);
+  overflow: auto;
+  padding: var(--space-3) var(--space-2) var(--space-5);
 }
 
 .bracket-scroll--mirrored {
   contain: layout paint;
   cursor: grab;
-  overscroll-behavior-x: contain;
+  overscroll-behavior: contain;
   scrollbar-color: rgba(207, 219, 47, 0.58) rgba(255, 255, 255, 0.08);
   scrollbar-width: thin;
   -webkit-overflow-scrolling: touch;
 }
 
 .bracket-scroll--mirrored::-webkit-scrollbar {
+  width: 10px;
   height: 10px;
 }
 
@@ -1229,6 +1261,16 @@ img {
 .bracket-scroll--mirrored.is-dragging {
   cursor: grabbing;
   user-select: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .bracket-scroll--mirrored {
+    cursor: grab;
+  }
+
+  .bracket-scroll--mirrored.is-dragging {
+    cursor: grabbing;
+  }
 }
 
 .bracket-board {
@@ -1328,9 +1370,9 @@ img {
 }
 
 .bracket-match--compact {
-  gap: 7px;
-  min-height: 78px;
-  padding: 9px;
+  gap: 9px;
+  min-height: 92px;
+  padding: 11px;
   border-radius: 6px;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
 }
@@ -1359,11 +1401,11 @@ img {
 }
 
 .bracket-match--compact .bracket-player {
-  min-height: 28px;
+  min-height: 32px;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px;
-  padding: 5px 7px;
+  padding: 6px 8px;
 }
 
 .bracket-player span {
@@ -1882,6 +1924,39 @@ textarea {
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
 }
 
+.bulk-actions,
+.back-link {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.back-link {
+  justify-content: flex-start;
+  width: fit-content;
+  color: var(--color-green);
+  font-weight: 900;
+}
+
+.back-link:hover {
+  color: var(--color-text);
+}
+
+.bulk-actions {
+  padding: var(--space-3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.bulk-actions > span {
+  color: var(--color-muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
 .schedule-form-grid,
 .publish-summary,
 .preliminary-grid {
@@ -2005,10 +2080,6 @@ button.preliminary-card--compact:hover {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.035);
-}
-
-.match-format-toggle {
-  margin-top: var(--space-3);
 }
 
 .result-entry {
@@ -2278,6 +2349,40 @@ button.preliminary-card--compact:hover {
 
 .match-result-toggle {
   width: 100%;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  a,
+  button:not(:disabled),
+  select,
+  [role="button"],
+  .button:not(:disabled),
+  .tabs button,
+  .category-option,
+  .check-pill,
+  .preliminary-card--compact,
+  .tournament-match-row,
+  .bracket-match:not(.is-disabled) {
+    cursor: var(--cursor-game-pointer);
+  }
+
+  input,
+  textarea {
+    cursor: text;
+  }
+
+  button:disabled,
+  .button:disabled {
+    cursor: not-allowed;
+  }
+
+  .bracket-scroll--mirrored {
+    cursor: grab;
+  }
+
+  .bracket-scroll--mirrored.is-dragging {
+    cursor: grabbing;
+  }
 }
 
 .empty-state {
