@@ -1,3 +1,4 @@
+import { create34PlayerTestTournament, getTestTournamentDiagnostics as getDevTestTournamentDiagnostics, isTestTournamentName, simulatePreliminaryResults } from "../dev/tournamentTestFactory";
 import { createMockId, mutateMockData, readMockData } from "../mocks/mockDatabase";
 import { auditService } from "./auditService";
 import { mockRequest } from "./serviceUtils";
@@ -28,21 +29,24 @@ export const tournamentService = {
   },
   async createTournament(payload, actor = "admin-1") {
     return mockRequest(async () => {
-      const tournament = mutateMockData((db) => {
-        const created = {
-          id: createMockId("tour"),
-          status: "Borrador",
-          participants: [],
-          phases: [],
-          categories: [],
-          courts: [],
-          ...payload,
-        };
-        db.tournaments.push(created);
-        return created;
-      });
+      const shouldUseDevFactory = isTestTournamentName(payload.name) && payload.type === "Preliminar";
+      const tournament = shouldUseDevFactory
+        ? create34PlayerTestTournament(payload)
+        : mutateMockData((db) => {
+            const created = {
+              id: createMockId("tour"),
+              status: "Inscripciones abiertas",
+              participants: [],
+              phases: [],
+              categories: [],
+              courts: [],
+              ...payload,
+            };
+            db.tournaments.push(created);
+            return created;
+          });
       await auditService.record({
-        action: "create_tournament",
+        action: shouldUseDevFactory ? "create_dev_test_tournament" : "create_tournament",
         entityType: "tournament",
         entityId: tournament.id,
         description: `Torneo creado: ${tournament.name}`,
@@ -71,5 +75,21 @@ export const tournamentService = {
   },
   async cancelTournament(id, actor = "admin-1") {
     return this.updateTournament(id, { status: "Cancelado" }, actor);
+  },
+  async simulateTestPreliminaries(id, actor = "admin-1") {
+    return mockRequest(async () => {
+      const result = simulatePreliminaryResults(id);
+      await auditService.record({
+        action: "simulate_dev_preliminaries",
+        entityType: "tournament",
+        entityId: id,
+        description: "Preliminares DEV simuladas en mock.",
+        actor,
+      });
+      return result;
+    }, "No pudimos simular las preliminares.");
+  },
+  async getTestTournamentDiagnostics(id) {
+    return mockRequest(() => getDevTestTournamentDiagnostics(id), "No pudimos obtener diagnostico del torneo de prueba.");
   },
 };

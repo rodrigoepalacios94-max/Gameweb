@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { CalendarDays, CreditCard, GitBranch, ShieldAlert, UsersRound } from "lucide-react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import { CalendarDays, CreditCard, GitBranch, Play, ShieldAlert, UsersRound } from "lucide-react";
 import { Avatar } from "../../components/common/Avatar";
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
@@ -21,7 +21,8 @@ import { formatCurrency, formatDate } from "../../utils/formatters";
 
 export function AdminTournamentDetailPage() {
   const { id } = useParams();
-  const [tab, setTab] = useState("summary");
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState(() => searchParams.get("tab") || "summary");
   const { data, loading, error, reload } = useAsyncData(async () => {
     const [tournament, matches, bracket, registrations, schedule, participants, categories, claims, players] = await Promise.all([
       tournamentService.getTournamentById(id),
@@ -56,6 +57,12 @@ export function AdminTournamentDetailPage() {
     { id: "discipline", label: "Disciplina" },
   ];
 
+  async function simulatePreliminaries() {
+    await tournamentService.simulateTestPreliminaries(tournament.id);
+    setTab("bracket");
+    reload();
+  }
+
   return (
     <div className="page-stack">
       <header className="detail-hero tournament-detail-hero">
@@ -68,6 +75,7 @@ export function AdminTournamentDetailPage() {
             <span><CalendarDays size={16} /> {formatDate(tournament.startDate)}</span>
             <span>{tournament.type}</span>
             <span>{formatCurrency(tournament.price)}</span>
+            {tournament.isDevTest ? <Badge tone="warning">DEV TEST</Badge> : null}
           </div>
         </div>
       </header>
@@ -198,7 +206,29 @@ export function AdminTournamentDetailPage() {
             <span>Cuadro / llave</span>
             <GitBranch size={18} />
           </div>
-          {bracket ? (
+          {tournament.isDevTest ? (
+            <div className="dev-test-panel">
+              <div>
+                <strong>Torneo Prueba</strong>
+                <span>{participants.length} bots inscriptos / {matches.filter((match) => match.phase === "Preliminar").length} preliminares generadas.</span>
+              </div>
+              <Button icon={Play} disabled={tournament.testSimulationStatus === "Simulado"} onClick={simulatePreliminaries}>
+                {tournament.testSimulationStatus === "Simulado" ? "Preliminares simuladas" : "Simular preliminares"}
+              </Button>
+            </div>
+          ) : null}
+          {bracket?.preliminaries?.length ? (
+            <div className="preliminary-grid">
+              {bracket.preliminaries.map((match) => (
+                <div key={match.matchId || `${match.playerA}-${match.playerB}`} className="preliminary-card">
+                  <strong>{match.playerA} vs {match.playerB}</strong>
+                  <span>{match.result || match.status}</span>
+                  {match.winner ? <Badge tone="success">Gana {match.winner}</Badge> : <Badge tone="info">{match.status}</Badge>}
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {bracket?.rounds?.length ? (
             <div className="bracket-scroll">
               <div className="bracket-board">
                 {bracket.rounds.map((round) => (

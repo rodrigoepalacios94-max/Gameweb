@@ -12,9 +12,8 @@ import { notificationService } from "../../services/notificationService";
 const filters = [
   { id: "all", label: "Todas" },
   { id: "unread", label: "No leidas" },
-  { id: "Disciplina", label: "Disciplina" },
-  { id: "Categoria", label: "Solicitudes" },
-  { id: "Partido", label: "Partidos" },
+  { id: "Resultado", label: "Resultados" },
+  { id: "Programacion", label: "Programacion" },
 ];
 
 export function AdminNotificationsPage() {
@@ -46,7 +45,7 @@ export function AdminNotificationsPage() {
         <div>
           <span className="eyebrow">Administrador</span>
           <h1>Avisos</h1>
-          <p>Eventos relevantes para el profesor: descensos, reclamos, limite de faltas, conflictos y resultados pendientes.</p>
+          <p>Eventos operativos importantes calculados desde los partidos mock.</p>
         </div>
         <Button variant="secondary" icon={CheckCheck} disabled={!unreadCount} onClick={markAllRead}>Marcar todas</Button>
       </header>

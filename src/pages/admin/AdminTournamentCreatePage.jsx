@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { CalendarDays, CheckCircle2, GitBranch, MapPinned, Trophy, UsersRound } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { CalendarDays, CheckCircle2, Clock, GitBranch, Send, Trash2, UsersRound, X } from "lucide-react";
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
@@ -9,19 +10,53 @@ import { Tabs } from "../../components/common/Tabs";
 import { useAsyncData } from "../../hooks/useAsyncData";
 import { adminService } from "../../services/adminService";
 import { categoryService } from "../../services/categoryService";
+import { tournamentService } from "../../services/tournamentService";
+import { formatDate } from "../../utils/formatters";
 
 const steps = [
   { id: "general", label: "General" },
   { id: "categories", label: "Categorias" },
   { id: "format", label: "Formato" },
-  { id: "scoring", label: "Puntaje" },
-  { id: "schedule", label: "Canchas y horarios" },
+  { id: "schedule", label: "Horarios" },
   { id: "publish", label: "Publicar" },
 ];
 
+const formatDescriptions = {
+  Preliminar: "Todos juegan preliminar antes del cuadro.",
+  Zonas: "Grupos todos contra todos y cierre eliminatorio.",
+  "Eliminacion Directa": "Cuadro directo desde el inicio.",
+};
+
+const initialForm = {
+  name: "",
+  description: "",
+  startDate: "2026-08-08",
+  endDate: "2026-08-16",
+  registrationCloseDate: "2026-08-06",
+  semifinalsDate: "2026-08-15",
+  finalsDate: "2026-08-16",
+  price: 18000,
+  scoringSystem: "GAME 1000",
+  type: "Preliminar",
+};
+
+function hasDuplicatedTimes(times) {
+  const filled = times.filter(Boolean);
+  return new Set(filled).size !== filled.length;
+}
+
+function sortTimes(times) {
+  return [...times].filter(Boolean).sort((a, b) => a.localeCompare(b));
+}
+
 export function AdminTournamentCreatePage() {
+  const navigate = useNavigate();
   const [activeStep, setActiveStep] = useState("general");
-  const [selectedFormat, setSelectedFormat] = useState("Preliminar");
+  const [form, setForm] = useState(initialForm);
+  const [selectedCategories, setSelectedCategories] = useState([]);
+  const [schedule, setSchedule] = useState({ saturday: ["10:00"], sunday: ["09:00"] });
+  const [formError, setFormError] = useState("");
+  const [publishing, setPublishing] = useState(false);
   const { data, loading, error, reload } = useAsyncData(async () => {
     const [settings, categories] = await Promise.all([
       adminService.getSettings(),
@@ -30,116 +65,244 @@ export function AdminTournamentCreatePage() {
     return { settings, categories };
   }, []);
 
+  const isDirty = useMemo(() => {
+    return (
+      form.name.trim() ||
+      form.description.trim() ||
+      selectedCategories.length ||
+      schedule.saturday.some(Boolean) ||
+      schedule.sunday.some(Boolean)
+    );
+  }, [form, selectedCategories, schedule]);
+
   if (loading) return <LoadingState message="Cargando asistente..." />;
   if (error) return <ErrorState title="No pudimos cargar el asistente." onRetry={reload} />;
 
   const { settings, categories } = data;
+  const activeCategories = categories.filter((category) => category.status === "Activa");
+  const saturdayError = hasDuplicatedTimes(schedule.saturday);
+  const sundayError = hasDuplicatedTimes(schedule.sunday);
+  const selectedCategoryNames = categories
+    .filter((category) => selectedCategories.includes(category.id))
+    .map((category) => `${category.name} ${category.branch}`);
+
+  function updateField(field, value) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function toggleCategory(categoryId) {
+    setSelectedCategories((current) =>
+      current.includes(categoryId) ? current.filter((item) => item !== categoryId) : [...current, categoryId],
+    );
+  }
+
+  function updateTime(day, index, value) {
+    setSchedule((current) => ({
+      ...current,
+      [day]: current[day].map((time, timeIndex) => (timeIndex === index ? value : time)),
+    }));
+  }
+
+  function addTime(day) {
+    setSchedule((current) => ({ ...current, [day]: [...current[day], ""] }));
+  }
+
+  function removeTime(day, index) {
+    setSchedule((current) => ({
+      ...current,
+      [day]: current[day].length === 1 ? [""] : current[day].filter((_, timeIndex) => timeIndex !== index),
+    }));
+  }
+
+  function cancelCreation() {
+    if (!isDirty || window.confirm("Seguro que queres cancelar la creacion del torneo? Los datos ingresados se perderan.")) {
+      navigate("/admin/tournaments");
+    }
+  }
+
+  async function publishTournament() {
+    setFormError("");
+    if (!form.name.trim()) {
+      setFormError("Completa el nombre del torneo.");
+      setActiveStep("general");
+      return;
+    }
+    if (!selectedCategories.length) {
+      setFormError("Selecciona al menos una categoria.");
+      setActiveStep("categories");
+      return;
+    }
+    if (saturdayError || sundayError) {
+      setFormError("Elimina horarios duplicados antes de publicar.");
+      setActiveStep("schedule");
+      return;
+    }
+    const saturday = sortTimes(schedule.saturday);
+    const sunday = sortTimes(schedule.sunday);
+    if (!saturday.length && !sunday.length) {
+      setFormError("Carga al menos un horario de competencia.");
+      setActiveStep("schedule");
+      return;
+    }
+
+    setPublishing(true);
+    const tournament = await tournamentService.createTournament({
+      ...form,
+      description: form.description || "Torneo creado desde el asistente admin.",
+      status: "Inscripciones abiertas",
+      price: Number(form.price),
+      categories: selectedCategories,
+      playerCategoryId: selectedCategories[0],
+      playerCategoryName: selectedCategoryNames[0],
+      schedule: { saturday, sunday },
+      courtCapacity: { saturday: 3, sunday: 4 },
+      courts: ["Cancha 1", "Cancha 2", "Cancha 3", "Cancha 4"],
+      phases: form.type === "Preliminar" ? ["Preliminar", "Cuadro principal"] : [form.type],
+      participants: [],
+      registrationStatus: "No inscripto",
+      playerTournamentStatus: "Disponible",
+    });
+    navigate(`/admin/tournaments/${tournament.id}?tab=${tournament.isDevTest ? "bracket" : "summary"}`);
+  }
 
   return (
     <div className="page-stack">
-      <header className="page-header page-header--wide">
-        <span className="eyebrow">Nuevo torneo</span>
-        <h1>Asistente de creacion</h1>
-        <p>Flujo visual basado en estructura.md. El profesor define datos clave y GAME queda preparado para organizar programacion y llaves.</p>
+      <header className="page-header page-header--actions page-header--wide">
+        <div>
+          <span className="eyebrow">Nuevo torneo</span>
+          <h1>Asistente de creacion</h1>
+          <p>Completa la informacion del torneo y publica desde el resumen final.</p>
+        </div>
+        <Button variant="ghost" icon={X} onClick={cancelCreation}>Cancelar</Button>
       </header>
 
       <Tabs tabs={steps} activeTab={activeStep} onChange={setActiveStep} />
+      {formError ? <div className="form-alert">{formError}</div> : null}
 
       <Card className="form-card">
         {activeStep === "general" ? (
           <div className="form-grid">
-            <label>Nombre<input defaultValue="GAME 1000 Copa Invierno" /></label>
-            <label>Edicion<input defaultValue="2026 - Invierno" /></label>
-            <label>Descripcion<textarea defaultValue="Torneo central del calendario con finales el domingo." /></label>
-            <label>Valor de inscripcion<input type="number" defaultValue="18000" /></label>
-            <label>Cupo maximo por categoria<input type="number" defaultValue="16" /></label>
-            <label>Estado<select defaultValue="Borrador"><option>Borrador</option><option>Inscripciones abiertas</option></select></label>
-            <label>Reglamento especifico<textarea defaultValue="Se aplican reglas oficiales del circuito GAME." /></label>
-            <label>Observaciones internas<textarea defaultValue="Revisar disponibilidad de jugadores con doble categoria antes de publicar." /></label>
+            <label>Nombre<input value={form.name} onChange={(event) => updateField("name", event.target.value)} placeholder="GAME 1000 Copa Invierno" /></label>
+            <label>Descripcion<textarea value={form.description} onChange={(event) => updateField("description", event.target.value)} placeholder="Descripcion opcional del torneo" /></label>
+            <label>Fecha de inicio<input type="date" value={form.startDate} onChange={(event) => updateField("startDate", event.target.value)} /></label>
+            <label>Fecha de finalizacion<input type="date" value={form.endDate} onChange={(event) => updateField("endDate", event.target.value)} /></label>
+            <label>Cierre previsto de inscripciones<input type="date" value={form.registrationCloseDate} onChange={(event) => updateField("registrationCloseDate", event.target.value)} /></label>
+            <label>Fecha de semifinal<input type="date" value={form.semifinalsDate} onChange={(event) => updateField("semifinalsDate", event.target.value)} /></label>
+            <label>Dia de finales<input type="date" value={form.finalsDate} onChange={(event) => updateField("finalsDate", event.target.value)} /></label>
+            <label>Valor de inscripcion<input type="number" value={form.price} onChange={(event) => updateField("price", event.target.value)} /></label>
           </div>
         ) : null}
 
         {activeStep === "categories" ? (
-          <div className="admin-create-section">
-            <div className="info-band">
-              <strong>Regla de categoria</strong>
-              <span>Las categorias son configurables por nivel jerarquico. El nivel se usa para validar si un jugador puede jugar su categoria o superiores.</span>
-            </div>
-            <div className="badge-cloud">
-              {categories.map((category) => (
-                <label key={category.id} className="check-pill">
-                  <input type="checkbox" defaultChecked={category.status === "Activa" && category.level <= 5} />
-                  <strong>{category.name} {category.branch}</strong>
-                  <span>Nivel {category.level} / {category.status}</span>
-                </label>
-              ))}
-            </div>
+          <div className="badge-cloud badge-cloud--wide">
+            {activeCategories.map((category) => (
+              <label key={category.id} className={selectedCategories.includes(category.id) ? "check-pill is-selected" : "check-pill"}>
+                <input type="checkbox" checked={selectedCategories.includes(category.id)} onChange={() => toggleCategory(category.id)} />
+                <strong>{category.name} {category.branch}</strong>
+                <span>Nivel {category.level} / {category.status}</span>
+              </label>
+            ))}
           </div>
         ) : null}
 
         {activeStep === "format" ? (
           <div className="option-grid">
             {settings.tournamentTypes.map((format) => (
-              <button key={format} className={selectedFormat === format ? "category-option is-selected" : "category-option"} type="button" onClick={() => setSelectedFormat(format)}>
+              <button key={format} className={form.type === format ? "category-option is-selected" : "category-option"} type="button" onClick={() => updateField("type", format)}>
                 <GitBranch size={20} />
                 <strong>{format}</strong>
-                <span>{format === "Preliminar" ? "Preliminar para sumar puntos, ordenar y definir cuadro principal." : null}</span>
-                <span>{format === "Zonas" ? "Todos contra todos, desempates y luego eliminacion directa." : null}</span>
-                <span>{format === "Eliminacion Directa" ? "Cuadro directo con cabezas de serie si utiliza ranking." : null}</span>
+                <span>{formatDescriptions[format]}</span>
               </button>
-            ))}
-            <div className="info-band">
-              <strong>Ranking y llaves</strong>
-              <span>El ranking general se usa para cabezas de serie y desempates; nunca para otorgar byes.</span>
-            </div>
-          </div>
-        ) : null}
-
-        {activeStep === "scoring" ? (
-          <div className="admin-table">
-            {settings.scoringSystems.map((system) => (
-              <div key={system.name} className="admin-table-row admin-table-row--scoring">
-                <Trophy size={20} />
-                <strong>{system.name}</strong>
-                <span>Inscripcion {system.inscription}</span>
-                <span>Preliminar {system.preliminary}</span>
-                <span>Campeon {system.champion}</span>
-                <Badge tone="info">Configurable</Badge>
-              </div>
             ))}
           </div>
         ) : null}
 
         {activeStep === "schedule" ? (
-          <div className="form-grid">
-            <label>Fecha de inicio<input type="date" defaultValue="2026-08-08" /></label>
-            <label>Fecha prevista de semifinales<input type="date" defaultValue="2026-08-15" /></label>
-            <label>Dia de finales<input type="date" defaultValue="2026-08-16" /></label>
-            <label>Canchas<textarea defaultValue={settings.courts.join(", ")} /></label>
-            <label>Turnos disponibles<textarea defaultValue={settings.timeSlots.join("\n")} /></label>
-            <div className="info-band">
-              <strong>Programacion editable</strong>
-              <span>GAME distribuye segun disponibilidad, canchas, descanso, fases y finales; el profesor puede modificar fechas, horarios y canchas.</span>
-            </div>
+          <div className="schedule-form-grid">
+            <ScheduleColumn
+              title="Sabado"
+              capacity="3 canchas"
+              times={schedule.saturday}
+              hasError={saturdayError}
+              onChange={(index, value) => updateTime("saturday", index, value)}
+              onAdd={() => addTime("saturday")}
+              onRemove={(index) => removeTime("saturday", index)}
+            />
+            <ScheduleColumn
+              title="Domingo"
+              capacity="4 canchas"
+              times={schedule.sunday}
+              hasError={sundayError}
+              onChange={(index, value) => updateTime("sunday", index, value)}
+              onAdd={() => addTime("sunday")}
+              onRemove={(index) => removeTime("sunday", index)}
+            />
           </div>
         ) : null}
 
         {activeStep === "publish" ? (
-          <div className="publish-grid">
-            <div className="publish-item"><CheckCircle2 size={22} /><strong>Informacion general</strong><span>Lista para guardar como borrador.</span></div>
-            <div className="publish-item"><UsersRound size={22} /><strong>Categorias</strong><span>Configurables y seleccionadas por nivel.</span></div>
-            <div className="publish-item"><GitBranch size={22} /><strong>Formato</strong><span>{selectedFormat}</span></div>
-            <div className="publish-item"><MapPinned size={22} /><strong>Canchas</strong><span>Disponibilidad preparada para programacion.</span></div>
-            <div className="publish-item"><CalendarDays size={22} /><strong>Fechas clave</strong><span>Inicio, semifinales y finales definidas.</span></div>
+          <div className="publish-summary">
+            <SummarySection title="Informacion general" icon={CalendarDays}>
+              <span>Nombre: {form.name || "Sin nombre"}</span>
+              <span>Descripcion: {form.description || "Sin descripcion"}</span>
+              <span>Inicio: {formatDate(form.startDate)}</span>
+              <span>Finalizacion: {formatDate(form.endDate)}</span>
+              <span>Cierre previsto: {formatDate(form.registrationCloseDate)}</span>
+              <span>Semifinal: {formatDate(form.semifinalsDate)}</span>
+              <span>Dia de finales: {formatDate(form.finalsDate)}</span>
+            </SummarySection>
+            <SummarySection title="Formato" icon={GitBranch}>
+              <span>{form.type}</span>
+            </SummarySection>
+            <SummarySection title="Categorias" icon={UsersRound}>
+              {selectedCategoryNames.length ? selectedCategoryNames.map((name) => <span key={name}>{name}</span>) : <span>Sin categorias seleccionadas</span>}
+            </SummarySection>
+            <SummarySection title="Horarios" icon={Clock}>
+              <span>Sabado: {sortTimes(schedule.saturday).join(", ") || "Sin horarios"}</span>
+              <span>Domingo: {sortTimes(schedule.sunday).join(", ") || "Sin horarios"}</span>
+            </SummarySection>
+            <SummarySection title="Capacidad de canchas" icon={CheckCircle2}>
+              <span>Sabado: 3 canchas</span>
+              <span>Domingo: 4 canchas</span>
+            </SummarySection>
+            <div className="wizard-actions wizard-actions--publish">
+              <Button variant="ghost" icon={X} onClick={cancelCreation}>Cancelar</Button>
+              <Button icon={Send} disabled={publishing} onClick={publishTournament}>{publishing ? "Publicando..." : "Publicar torneo"}</Button>
+            </div>
           </div>
         ) : null}
-
-        <div className="wizard-actions">
-          <Button variant="secondary">Guardar borrador</Button>
-          <Button variant="outline-green">Vista previa</Button>
-          <Button>Continuar</Button>
-        </div>
       </Card>
     </div>
+  );
+}
+
+function ScheduleColumn({ title, capacity, times, hasError, onChange, onAdd, onRemove }) {
+  return (
+    <section className="schedule-column">
+      <div className="section-title">
+        <span>{title}</span>
+        <Badge tone="info">{capacity}</Badge>
+      </div>
+      <div className="time-list">
+        {times.map((time, index) => (
+          <div key={`${title}-${index}`} className="time-row">
+            <input type="time" value={time} onChange={(event) => onChange(index, event.target.value)} />
+            <Button variant="ghost" size="icon" icon={Trash2} onClick={() => onRemove(index)}>Eliminar</Button>
+          </div>
+        ))}
+      </div>
+      {hasError ? <span className="field-error">Hay horarios duplicados en este dia.</span> : null}
+      <Button variant="outline-green" onClick={onAdd}>+ Agregar horario</Button>
+    </section>
+  );
+}
+
+function SummarySection({ title, icon: Icon, children }) {
+  return (
+    <section className="publish-item publish-item--summary">
+      <Icon size={22} />
+      <strong>{title}</strong>
+      <div className="info-list">{children}</div>
+    </section>
   );
 }

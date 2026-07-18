@@ -8,7 +8,6 @@ import {
   MessageSquareWarning,
   Settings,
   ShieldAlert,
-  Tags,
   Trophy,
   UsersRound,
 } from "lucide-react";
@@ -23,19 +22,18 @@ const adminNav = [
   { to: "/admin", label: "Inicio", icon: Gauge, end: true },
   { to: "/admin/tournaments", label: "Torneos", icon: Trophy },
   { to: "/admin/players", label: "Jugadores", icon: UsersRound },
-  { to: "/admin/categories", label: "Categorias", icon: Tags },
   { to: "/admin/ranking", label: "Ranking", icon: Medal },
   { to: "/admin/matches", label: "Partidos", icon: CalendarClock },
-  { to: "/admin/discipline", label: "Disciplina", icon: ShieldAlert },
-  { to: "/admin/requests", label: "Solicitudes", icon: MessageSquareWarning },
-  { to: "/admin/notifications", label: "Avisos", icon: Bell },
+  { to: "/admin/discipline", label: "Disciplina", icon: ShieldAlert, badgeKey: "discipline" },
+  { to: "/admin/requests", label: "Solicitudes", icon: MessageSquareWarning, badgeKey: "requests" },
+  { to: "/admin/notifications", label: "Avisos", icon: Bell, badgeKey: "notifications" },
   { to: "/admin/settings", label: "Configuracion", icon: Settings },
 ];
 
 export function AdminLayout() {
   const { user } = useAuth();
-  const { data: notifications = [] } = useAsyncData(() => notificationService.getNotificationsByRole("admin"), []);
-  const unreadCount = (notifications || []).filter((item) => !item.read).length;
+  const { data: sidebarCountsData } = useAsyncData(() => notificationService.getAdminSidebarCounts(), []);
+  const sidebarCounts = sidebarCountsData || {};
 
   return (
     <div className="admin-shell">
@@ -45,7 +43,8 @@ export function AdminLayout() {
           {adminNav.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => (isActive ? "is-active" : "")}>
               <item.icon size={19} />
-              <span>{item.label}</span>
+              <span className="sidebar-nav-label">{item.label}</span>
+              {item.badgeKey && sidebarCounts[item.badgeKey] ? <span className="sidebar-badge">{sidebarCounts[item.badgeKey]}</span> : null}
             </NavLink>
           ))}
         </nav>
@@ -60,10 +59,6 @@ export function AdminLayout() {
             <RoleSwitcher />
           </div>
           <div className="topbar-actions">
-            <NavLink className="notification-button" to="/admin/notifications" aria-label="Notificaciones">
-              <Bell size={21} />
-              {unreadCount ? <span /> : null}
-            </NavLink>
             <div className="topbar-user">
               <Avatar src={user.avatar} name={user.fullName} size="sm" />
               <span>{user.fullName}</span>
@@ -79,6 +74,7 @@ export function AdminLayout() {
             <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => (isActive ? "is-active" : "")}>
               <item.icon size={20} />
               <span>{item.label}</span>
+              {item.badgeKey && sidebarCounts[item.badgeKey] ? <span className="sidebar-badge bottom-nav-badge">{sidebarCounts[item.badgeKey]}</span> : null}
             </NavLink>
           ))}
         </nav>

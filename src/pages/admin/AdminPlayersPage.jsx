@@ -64,8 +64,10 @@ export function AdminPlayersPage() {
           <div className="admin-table">
             {filteredPlayers.map((player) => (
               <div key={player.id} className="admin-table-row admin-table-row--players">
-                <Avatar src={player.avatar} name={player.fullName} size="sm" />
-                <strong>{player.fullName}</strong>
+                <div className="table-identity">
+                  <Avatar src={player.avatar} name={player.fullName} size="sm" />
+                  <strong>{player.fullName}</strong>
+                </div>
                 <span>{player.categoryName}</span>
                 <span>#{player.ranking}</span>
                 <span>{player.points} pts</span>

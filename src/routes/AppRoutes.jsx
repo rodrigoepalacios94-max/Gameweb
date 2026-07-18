@@ -54,13 +54,14 @@ export function AppRoutes() {
         <Route path="players" element={<AdminPlayersPage />} />
         <Route path="players/:id" element={<AdminPlayerDetailPage />} />
         <Route path="ranking" element={<AdminRankingPage />} />
-        <Route path="categories" element={<AdminCategoriesPage />} />
+        <Route path="categories" element={<Navigate to="/admin/settings/categories" replace />} />
         <Route path="matches" element={<AdminMatchesPage />} />
         <Route path="matches/:id" element={<AdminMatchDetailPage />} />
         <Route path="discipline" element={<AdminDisciplinePage />} />
         <Route path="requests" element={<AdminRequestsPage />} />
         <Route path="notifications" element={<AdminNotificationsPage />} />
         <Route path="settings" element={<AdminSettingsPage />} />
+        <Route path="settings/categories" element={<AdminCategoriesPage />} />
       </Route>
       <Route path="*" element={<HomeRedirect />} />
     </Routes>

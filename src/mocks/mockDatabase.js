@@ -39,6 +39,7 @@ export const mockDb = {
   schedule: clone(mockSchedule),
   settings: clone(mockSettings),
   auditLogs: [],
+  operationalAlertReads: [],
 };
 
 export function readMockData(selector) {

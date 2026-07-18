@@ -14,18 +14,17 @@ import { rankingService } from "../../services/rankingService";
 export function AdminRankingPage() {
   const [categoryId, setCategoryId] = useState("cat-m4");
   const { data, loading, error, reload } = useAsyncData(async () => {
-    const [categories, entries, movements] = await Promise.all([
+    const [categories, entries] = await Promise.all([
       categoryService.getCategories(),
       rankingService.getRankingByCategory(categoryId),
-      rankingService.getPlayerRankingHistory("player-1"),
     ]);
-    return { categories, entries, movements };
+    return { categories, entries };
   }, [categoryId]);
 
   if (loading) return <LoadingState message="Cargando ranking admin..." />;
   if (error) return <ErrorState title="No pudimos cargar ranking admin." onRetry={reload} />;
 
-  const { categories, entries, movements } = data;
+  const { categories, entries } = data;
 
   return (
     <div className="page-stack">
@@ -33,45 +32,26 @@ export function AdminRankingPage() {
         <div>
           <span className="eyebrow">Gestion</span>
           <h1>Ranking</h1>
-          <p>Ranking por categoria, movimientos de puntos y ajustes manuales auditables para futuras integraciones.</p>
+          <p>Posiciones, jugadores, categorias y puntos administrables del circuito.</p>
         </div>
         <Button icon={Pencil}>Ajustar puntos</Button>
       </header>
 
-      <div className="detail-grid">
-        <Card>
-          <Select label="Categoria" value={categoryId} onChange={setCategoryId} options={categories.map((category) => ({ value: category.id, label: `${category.name} ${category.branch}` }))} />
-          <div className="admin-table ranking-admin-table">
-            {entries.map((entry) => (
-              <div key={entry.playerId} className="admin-table-row admin-table-row--ranking">
-                <strong>#{entry.position}</strong>
-                <Avatar src={entry.player.avatar} name={entry.player.fullName} size="sm" />
-                <span>{entry.player.fullName}</span>
-                <span>{entry.player.categoryName}</span>
-                <b>{entry.points} pts</b>
-                <Badge tone={entry.position <= 4 ? "info" : "neutral"}>{entry.position <= 4 ? "Siembra" : "Ranking"}</Badge>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card>
-          <h2>Historial de movimientos</h2>
-          <div className="compact-list">
-            {movements.map((movement) => (
-              <div key={movement.id} className="compact-item movement">
-                <strong>{movement.concept}</strong>
-                <span>{movement.tournament}</span>
-                <b>+{movement.points} pts</b>
-              </div>
-            ))}
-          </div>
-          <div className="info-band">
-            <strong>Regla aplicada</strong>
-            <span>El ranking general se usa para cabezas de serie y desempates. No otorga byes ni reemplaza el orden de preliminares.</span>
-          </div>
-        </Card>
-      </div>
+      <Card>
+        <Select label="Categoria" value={categoryId} onChange={setCategoryId} options={categories.map((category) => ({ value: category.id, label: `${category.name} ${category.branch}` }))} />
+        <div className="admin-table ranking-admin-table">
+          {entries.map((entry) => (
+            <div key={entry.playerId} className="admin-table-row admin-table-row--ranking">
+              <strong>#{entry.position}</strong>
+              <Avatar src={entry.player.avatar} name={entry.player.fullName} size="sm" />
+              <span>{entry.player.fullName}</span>
+              <span>{entry.player.categoryName}</span>
+              <b>{entry.points} pts</b>
+              <Badge tone={entry.position <= 4 ? "info" : "neutral"}>{entry.position <= 4 ? "Siembra" : "Ranking"}</Badge>
+            </div>
+          ))}
+        </div>
+      </Card>
     </div>
   );
 }

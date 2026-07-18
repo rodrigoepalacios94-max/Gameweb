@@ -681,6 +681,41 @@ img {
   font-weight: 850;
 }
 
+.sidebar-nav-label {
+  min-width: 0;
+  flex: 1;
+}
+
+.sidebar-badge {
+  display: inline-grid;
+  min-width: 22px;
+  height: 22px;
+  place-items: center;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--color-orange);
+  color: #160902;
+  font-size: 0.76rem;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.desktop-nav a.is-active .sidebar-badge,
+.admin-sidebar a.is-active .sidebar-badge {
+  background: #101106;
+  color: var(--color-green);
+}
+
+.bottom-nav-badge {
+  position: absolute;
+  top: 5px;
+  right: 8px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 0.68rem;
+}
+
 .desktop-nav a:hover,
 .admin-sidebar a:hover {
   background: rgba(255, 255, 255, 0.055);
@@ -740,6 +775,7 @@ img {
 }
 
 .bottom-nav a {
+  position: relative;
   display: flex;
   min-height: 50px;
   flex-direction: column;
@@ -908,6 +944,15 @@ img {
   min-height: 100%;
 }
 
+.tournament-card--clickable {
+  cursor: pointer;
+}
+
+.tournament-card--clickable:hover {
+  border-color: rgba(207, 219, 47, 0.32);
+  background: rgba(255, 255, 255, 0.052);
+}
+
 .tournament-grid,
 .match-grid,
 .profile-stat-grid {
@@ -954,7 +999,17 @@ img {
 }
 
 .match-card__rival > div {
+  display: grid;
+  gap: 2px;
   flex: 1;
+  min-width: 0;
+}
+
+.match-card__rival strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .match-card__rival span,
@@ -1100,10 +1155,11 @@ img {
 
 .bracket-board {
   display: grid;
-  min-width: 760px;
-  grid-template-columns: repeat(3, minmax(210px, 1fr));
+  min-width: max-content;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(230px, 1fr);
   gap: var(--space-5);
-  align-items: center;
+  align-items: start;
 }
 
 .bracket-round {
@@ -1135,11 +1191,9 @@ img {
 }
 
 .bracket-player {
-  display: flex;
+  display: grid;
   min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
+  gap: 2px;
   padding: var(--space-2);
   border-radius: 5px;
   background: rgba(255, 255, 255, 0.035);
@@ -1150,6 +1204,17 @@ img {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.bracket-player small,
+.bracket-note {
+  color: var(--color-muted);
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+
+.bracket-note {
+  display: block;
 }
 
 .bracket-player.is-winner {
@@ -1370,6 +1435,25 @@ img {
   background: rgba(255, 255, 255, 0.035);
 }
 
+.admin-table-row > *,
+.table-identity {
+  min-width: 0;
+}
+
+.table-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.table-identity strong,
+.admin-table-row > strong,
+.admin-table-row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .admin-table-row:hover,
 .admin-timeline-item:hover,
 .schedule-slot:hover,
@@ -1380,11 +1464,11 @@ img {
 }
 
 .admin-table-row--players {
-  grid-template-columns: auto minmax(170px, 1.4fr) minmax(120px, 0.8fr) 60px 90px 70px auto auto;
+  grid-template-columns: minmax(230px, 1.65fr) minmax(130px, 0.85fr) 72px 92px 72px minmax(150px, 0.85fr) 82px;
 }
 
 .admin-table-row--matches {
-  grid-template-columns: minmax(160px, 1.4fr) minmax(110px, 0.9fr) minmax(80px, 0.7fr) minmax(140px, 0.9fr) minmax(90px, 0.7fr) auto auto;
+  grid-template-columns: minmax(230px, 1.55fr) minmax(130px, 0.85fr) minmax(90px, 0.65fr) minmax(150px, 0.9fr) minmax(100px, 0.65fr) minmax(120px, 0.75fr) 104px;
 }
 
 .admin-table-row--registrations {
@@ -1499,6 +1583,24 @@ img {
   justify-content: flex-end;
 }
 
+.wizard-actions--publish {
+  grid-column: 1 / -1;
+  margin-top: var(--space-2);
+}
+
+.form-alert,
+.field-error {
+  color: var(--color-orange);
+  font-weight: 850;
+}
+
+.form-alert {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid rgba(241, 133, 35, 0.32);
+  border-radius: var(--radius-sm);
+  background: rgba(241, 133, 35, 0.1);
+}
+
 .search-input,
 .select-field,
 .form-grid label {
@@ -1570,7 +1672,8 @@ textarea {
 }
 
 .category-option.is-selected,
-.slot.is-selected {
+.slot.is-selected,
+.check-pill.is-selected {
   border-color: var(--color-green);
   background: rgba(207, 219, 47, 0.11);
 }
@@ -1586,6 +1689,70 @@ textarea {
 
 .badge-cloud {
   grid-template-columns: repeat(auto-fit, minmax(130px, max-content));
+}
+
+.badge-cloud--wide {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.schedule-form-grid,
+.publish-summary,
+.preliminary-grid {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.schedule-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.schedule-column,
+.preliminary-card,
+.dev-test-panel {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.time-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.time-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.publish-summary {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.publish-item--summary {
+  align-content: start;
+}
+
+.dev-test-panel {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  margin-bottom: var(--space-4);
+  border-color: rgba(241, 133, 35, 0.24);
+  background: rgba(241, 133, 35, 0.08);
+}
+
+.dev-test-panel span,
+.preliminary-card span {
+  color: var(--color-muted);
+}
+
+.preliminary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  margin-bottom: var(--space-5);
 }
 
 .mock-note {
@@ -1888,6 +2055,7 @@ textarea {
   .admin-event-grid,
   .settings-grid,
   .schedule-board,
+  .schedule-form-grid,
   .publish-grid {
     grid-template-columns: 1fr;
   }
@@ -1913,6 +2081,23 @@ textarea {
 
   .bottom-nav span {
     display: none;
+  }
+}
+
+@media (max-width: 1023px) {
+  .admin-table-row--players,
+  .admin-table-row--matches,
+  .admin-table-row--registrations,
+  .admin-table-row--requests,
+  .admin-table-row--ranking,
+  .admin-table-row--scoring,
+  .admin-table-row--faults {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-table-row > .button,
+  .admin-table-row .card-actions {
+    justify-self: start;
   }
 }
 

@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { CalendarDays, Trophy } from "lucide-react";
 import { Badge } from "../common/Badge";
 import { Card } from "../common/Card";
@@ -13,8 +13,28 @@ const statusTone = {
 };
 
 export function TournamentCard({ tournament, to, actions }) {
+  const navigate = useNavigate();
+  const cardTarget = to || (actions ? `/admin/tournaments/${tournament.id}${tournament.bracketGenerated || tournament.testSimulationStatus === "Simulado" ? "?tab=bracket" : ""}` : null);
+
+  function openCard() {
+    if (cardTarget) navigate(cardTarget);
+  }
+
+  function stopNestedNavigation(event) {
+    event.stopPropagation();
+  }
+
   return (
-    <Card className="tournament-card tournament-card--premium">
+    <Card
+      className={cardTarget ? "tournament-card tournament-card--premium tournament-card--clickable" : "tournament-card tournament-card--premium"}
+      as="article"
+      role={cardTarget ? "button" : undefined}
+      tabIndex={cardTarget ? 0 : undefined}
+      onClick={openCard}
+      onKeyDown={(event) => {
+        if (cardTarget && (event.key === "Enter" || event.key === " ")) openCard();
+      }}
+    >
       <div className="tournament-card__top">
         <Trophy size={22} />
         <Badge tone={statusTone[tournament.status] || "neutral"}>{tournament.status}</Badge>
@@ -32,11 +52,11 @@ export function TournamentCard({ tournament, to, actions }) {
         {tournament.registrationStatus ? <span>{tournament.registrationStatus}</span> : null}
       </div>
       {to ? (
-        <Link className="button button--outline-green button--md" to={to}>
+        <Link className="button button--outline-green button--md" to={to} onClick={stopNestedNavigation}>
           <span>Ver torneo</span>
         </Link>
       ) : null}
-      {actions ? <div className="card-actions">{actions}</div> : null}
+      {actions ? <div className="card-actions" onClick={stopNestedNavigation}>{actions}</div> : null}
     </Card>
   );
 }

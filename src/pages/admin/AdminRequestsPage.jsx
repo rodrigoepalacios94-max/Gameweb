@@ -35,7 +35,7 @@ export function AdminRequestsPage() {
       <header className="page-header page-header--wide">
         <span className="eyebrow">Categorias</span>
         <h1>Solicitudes de descenso</h1>
-        <p>El jugador no puede inscribirse directamente en una categoria inferior. El profesor aprueba o rechaza la solicitud.</p>
+        <p>Revision administrativa de cambios de categoria solicitados por jugadores.</p>
       </header>
 
       <Card>
@@ -59,11 +59,6 @@ export function AdminRequestsPage() {
           })}
         </div>
       </Card>
-
-      <div className="info-band">
-        <strong>Consecuencia aplicada visualmente</strong>
-        <span>Mientras la solicitud esta pendiente, la inscripcion en categoria inferior permanece bloqueada. La actualizacion real de categoria queda para integracion de datos.</span>
-      </div>
     </div>
   );
 }

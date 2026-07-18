@@ -7,7 +7,6 @@ import { ErrorState } from "../../components/common/ErrorState";
 import { LoadingState } from "../../components/common/LoadingState";
 import { Modal } from "../../components/common/Modal";
 import { useAsyncData } from "../../hooks/useAsyncData";
-import { adminService } from "../../services/adminService";
 import { disciplineService } from "../../services/disciplineService";
 import { playerService } from "../../services/playerService";
 import { formatDate } from "../../utils/formatters";
@@ -15,19 +14,18 @@ import { formatDate } from "../../utils/formatters";
 export function AdminDisciplinePage() {
   const [selectedClaim, setSelectedClaim] = useState(null);
   const { data, loading, error, reload } = useAsyncData(async () => {
-    const [claims, faults, players, settings] = await Promise.all([
+    const [claims, faults, players] = await Promise.all([
       disciplineService.getClaims(),
       disciplineService.getFaults(),
       playerService.getPlayers(),
-      adminService.getSettings(),
     ]);
-    return { claims, faults, players, settings };
+    return { claims, faults, players };
   }, []);
 
   if (loading) return <LoadingState message="Cargando disciplina..." />;
   if (error) return <ErrorState title="No pudimos cargar disciplina." onRetry={reload} />;
 
-  const { claims, faults, players, settings } = data;
+  const { claims, faults, players } = data;
   const watchedPlayers = players.filter((player) => player.discipline.faults > 0);
 
   async function updateClaim(status) {
@@ -44,11 +42,6 @@ export function AdminDisciplinePage() {
         <h1>Disciplina</h1>
         <p>GAME contempla partidos sin arbitro permanente. Los reclamos quedan pendientes hasta revision del profesor.</p>
       </header>
-
-      <div className="info-band">
-        <strong>Limite disciplinario</strong>
-        <span>{settings.discipline.faultLimit} faltas confirmadas generan expulsion del torneo actual, bloqueo de nuevas inscripciones y rehabilitacion manual.</span>
-      </div>
 
       <div className="detail-grid">
         <Card>

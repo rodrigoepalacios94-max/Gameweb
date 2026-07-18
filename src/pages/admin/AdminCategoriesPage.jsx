@@ -29,15 +29,10 @@ export function AdminCategoriesPage() {
         <div>
           <span className="eyebrow">Configuracion</span>
           <h1>Categorias</h1>
-          <p>Las categorias son configurables y se comparan por nivel jerarquico, no por nombre.</p>
+          <p>Gestion de ramas, niveles jerarquicos y estados activos del circuito.</p>
         </div>
         <Button icon={Plus}>Crear categoria</Button>
       </header>
-
-      <div className="info-band">
-        <strong>Regla aplicada</strong>
-        <span>Un jugador puede disputar su categoria o superiores. Las categorias inferiores requieren solicitud de descenso aprobada por el profesor.</span>
-      </div>
 
       <div className="detail-grid">
         {branches.map((branch) => (
