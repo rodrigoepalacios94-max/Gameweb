@@ -51,9 +51,6 @@ export function PlayerHomePage() {
           <h1>
             Hola, <strong>{user.firstName}</strong>
           </h1>
-          <p>
-            {user.categoryName} / Ranking <b>#{user.ranking}</b> / <b>{user.points}</b> puntos
-          </p>
         </div>
         <div className="hero-sport-graphic" aria-hidden="true">
           <span className="tennis-ball" />
