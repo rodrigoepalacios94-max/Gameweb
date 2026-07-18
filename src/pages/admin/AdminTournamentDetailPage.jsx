@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { CalendarDays, CreditCard, GitBranch, Play, ShieldAlert, UsersRound } from "lucide-react";
+import { CalendarDays, CreditCard, GitBranch, ShieldAlert, UsersRound } from "lucide-react";
 import { Avatar } from "../../components/common/Avatar";
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
@@ -9,7 +9,8 @@ import { EmptyState } from "../../components/common/EmptyState";
 import { ErrorState } from "../../components/common/ErrorState";
 import { LoadingState } from "../../components/common/LoadingState";
 import { Tabs } from "../../components/common/Tabs";
-import { BracketMatch } from "../../components/brackets/BracketMatch";
+import { PreliminaryMatches } from "../../components/brackets/PreliminaryMatches";
+import { TournamentBracket } from "../../components/brackets/TournamentBracket";
 import { useAsyncData } from "../../hooks/useAsyncData";
 import { adminService } from "../../services/adminService";
 import { disciplineService } from "../../services/disciplineService";
@@ -201,7 +202,7 @@ export function AdminTournamentDetailPage() {
       ) : null}
 
       {tab === "bracket" ? (
-        <Card>
+        <Card className="bracket-card">
           <div className="section-title">
             <span>Cuadro / llave</span>
             <GitBranch size={18} />
@@ -212,39 +213,17 @@ export function AdminTournamentDetailPage() {
                 <strong>Torneo Prueba</strong>
                 <span>{participants.length} bots inscriptos / {matches.filter((match) => match.phase === "Preliminar").length} preliminares generadas.</span>
               </div>
-              <Button icon={Play} disabled={tournament.testSimulationStatus === "Simulado"} onClick={simulatePreliminaries}>
+              <Button disabled={tournament.testSimulationStatus === "Simulado"} onClick={simulatePreliminaries}>
                 {tournament.testSimulationStatus === "Simulado" ? "Preliminares simuladas" : "Simular preliminares"}
               </Button>
             </div>
           ) : null}
-          {bracket?.preliminaries?.length ? (
-            <div className="preliminary-grid">
-              {bracket.preliminaries.map((match) => (
-                <div key={match.matchId || `${match.playerA}-${match.playerB}`} className="preliminary-card">
-                  <strong>{match.playerA} vs {match.playerB}</strong>
-                  <span>{match.result || match.status}</span>
-                  {match.winner ? <Badge tone="success">Gana {match.winner}</Badge> : <Badge tone="info">{match.status}</Badge>}
-                </div>
-              ))}
-            </div>
-          ) : null}
+          <PreliminaryMatches preliminaries={bracket?.preliminaries || []} detailBasePath="/admin/matches" />
           {bracket?.rounds?.length ? (
-            <div className="bracket-scroll">
-              <div className="bracket-board">
-                {bracket.rounds.map((round) => (
-                  <section key={round.id} className="bracket-round">
-                    <h3>{round.name}</h3>
-                    {round.matches.map((match) => (
-                      <BracketMatch key={match.id} match={match} detailBasePath="/admin/matches" />
-                    ))}
-                  </section>
-                ))}
-              </div>
-            </div>
+            <TournamentBracket bracket={bracket} detailBasePath="/admin/matches" />
           ) : (
             <EmptyState title="Cuadro pendiente" description="La llave todavia no fue generada para este torneo mock." />
           )}
-          <p className="muted">La siembra visual respeta la referencia de estructura.md; el algoritmo definitivo queda para backend.</p>
         </Card>
       ) : null}
 

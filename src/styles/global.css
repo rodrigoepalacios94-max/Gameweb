@@ -38,6 +38,7 @@
 }
 
 html {
+  overflow-x: hidden;
   background: var(--color-bg);
 }
 
@@ -180,6 +181,7 @@ img {
 
 .page-stack {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-6);
 }
 
@@ -1147,10 +1149,81 @@ img {
   background: rgba(255, 255, 255, 0.055);
 }
 
+.bracket-section {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.bracket-card {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.bracket-card > * {
+  min-width: 0;
+}
+
+.bracket-main-section {
+  margin-top: var(--space-2);
+}
+
+.bracket-section-title {
+  gap: var(--space-3);
+}
+
+.bracket-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.bracket-hint {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.85rem;
+}
+
+.bracket-hint.is-muted {
+  opacity: 0.58;
+}
+
 .bracket-scroll {
   width: 100%;
+  max-width: 100%;
   overflow-x: auto;
-  padding-bottom: var(--space-2);
+  overflow-y: hidden;
+  padding: var(--space-2) 0 var(--space-4);
+}
+
+.bracket-scroll--mirrored {
+  contain: layout paint;
+  cursor: grab;
+  overscroll-behavior-x: contain;
+  scrollbar-color: rgba(207, 219, 47, 0.58) rgba(255, 255, 255, 0.08);
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.bracket-scroll--mirrored::-webkit-scrollbar {
+  height: 10px;
+}
+
+.bracket-scroll--mirrored::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.bracket-scroll--mirrored::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(207, 219, 47, 0.56);
+}
+
+.bracket-scroll--mirrored.is-dragging {
+  cursor: grabbing;
+  user-select: none;
 }
 
 .bracket-board {
@@ -1162,14 +1235,76 @@ img {
   align-items: start;
 }
 
+.bracket-board--mirrored {
+  position: relative;
+  width: var(--bracket-board-width);
+  min-width: var(--bracket-board-width);
+  grid-template-columns: repeat(var(--bracket-columns), var(--bracket-round-width));
+  grid-auto-columns: var(--bracket-round-width);
+  gap: var(--bracket-gap);
+  min-height: calc(var(--bracket-height) + var(--bracket-header-height));
+  align-items: start;
+}
+
+.bracket-connections {
+  position: absolute;
+  inset: 0 auto auto 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.bracket-connector {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.18);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.bracket-connector.is-active {
+  stroke: rgba(207, 219, 47, 0.54);
+}
+
 .bracket-round {
   display: grid;
   gap: var(--space-4);
 }
 
+.bracket-board--mirrored .bracket-round {
+  position: relative;
+  z-index: 1;
+  width: var(--bracket-round-width);
+  gap: 0;
+  grid-template-rows: var(--bracket-header-height) var(--bracket-height);
+}
+
 .bracket-round h3 {
   color: var(--color-green);
   text-transform: uppercase;
+}
+
+.bracket-board--mirrored .bracket-round h3 {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--bracket-header-height);
+  margin: 0;
+  font-size: 0.76rem;
+  letter-spacing: 0;
+}
+
+.bracket-round--final h3 {
+  color: var(--color-orange);
+}
+
+.bracket-round-lane {
+  position: relative;
+  height: var(--bracket-height);
+}
+
+.bracket-match-slot {
+  position: absolute;
+  left: 0;
+  width: 100%;
 }
 
 .bracket-match {
@@ -1180,6 +1315,19 @@ img {
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.04);
+}
+
+.bracket-match--compact {
+  gap: 4px;
+  min-height: 56px;
+  padding: 6px;
+  border-radius: 6px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+.bracket-round--final .bracket-match--compact {
+  border-color: rgba(207, 219, 47, 0.72);
+  box-shadow: inset 0 0 0 1px rgba(207, 219, 47, 0.18), 0 12px 30px rgba(207, 219, 47, 0.08);
 }
 
 .bracket-match:hover {
@@ -1199,6 +1347,14 @@ img {
   background: rgba(255, 255, 255, 0.035);
 }
 
+.bracket-match--compact .bracket-player {
+  min-height: 22px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 5px;
+}
+
 .bracket-player span {
   min-width: 0;
   overflow: hidden;
@@ -1213,8 +1369,28 @@ img {
   line-height: 1.25;
 }
 
+.bracket-match--compact .bracket-player small {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 0.62rem;
+  line-height: 1.1;
+}
+
+.bracket-match--compact .bracket-player b {
+  color: var(--color-text);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
 .bracket-note {
   display: block;
+}
+
+.bracket-match--compact .badge {
+  min-height: 20px;
+  padding: 0 var(--space-2);
+  font-size: 0.64rem;
 }
 
 .bracket-player.is-winner {
@@ -1753,6 +1929,47 @@ textarea {
 .preliminary-grid {
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   margin-bottom: var(--space-5);
+}
+
+.preliminary-section {
+  margin-bottom: var(--space-3);
+}
+
+.preliminary-grid--compact {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--space-2);
+  margin-bottom: 0;
+}
+
+.preliminary-card--compact {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.preliminary-card--compact strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preliminary-card--compact > span {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.preliminary-card--compact small {
+  grid-column: 1 / -1;
+  color: var(--color-muted);
+  font-size: 0.78rem;
+}
+
+a.preliminary-card--compact:hover {
+  border-color: rgba(207, 219, 47, 0.28);
+  background: rgba(255, 255, 255, 0.055);
 }
 
 .mock-note {
