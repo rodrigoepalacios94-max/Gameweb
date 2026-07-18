@@ -141,6 +141,7 @@ function updateBracketMatchFromMatch(bracketMatch, match) {
   bracketMatch.score = match.result || "Pendiente";
   bracketMatch.winner = match.winnerId === match.playerAId ? match.playerA : match.winnerId === match.playerBId ? match.playerB : null;
   bracketMatch.walkover = match.status === "W.O." || match.status === "Doble W.O.";
+  bracketMatch.doubleWalkover = match.status === "Doble W.O.";
 }
 
 function assignPlayerToBracketSlot(bracketMatch, side, player) {
@@ -199,6 +200,7 @@ function clearDownstreamIfNeeded(nextMatch, winner) {
     nextMatch.score = "Pendiente";
     nextMatch.winner = null;
     nextMatch.walkover = false;
+    nextMatch.doubleWalkover = false;
   }
 }
 

@@ -18,6 +18,7 @@ export function PreliminaryMatches({ preliminaries = [], title = "Preliminares",
       </div>
       <div className="preliminary-grid preliminary-grid--compact">
         {preliminaries.map((match, index) => {
+          const isDoubleWalkover = match.status === "Doble W.O." || match.result?.includes("Doble W.O.");
           const CardComponent = match.matchId && !onMatchOpen ? Link : match.matchId ? "button" : "div";
           const cardProps = match.matchId && onMatchOpen
             ? { type: "button", onClick: () => onMatchOpen(match.matchId) }
@@ -25,11 +26,11 @@ export function PreliminaryMatches({ preliminaries = [], title = "Preliminares",
               ? { to: `${detailBasePath}/${match.matchId}` }
               : {};
           return (
-            <CardComponent key={match.matchId || `${match.playerA}-${match.playerB}-${index}`} className="preliminary-card preliminary-card--compact" {...cardProps}>
+            <CardComponent key={match.matchId || `${match.playerA}-${match.playerB}-${index}`} className={isDoubleWalkover ? "preliminary-card preliminary-card--compact is-double-walkover" : "preliminary-card preliminary-card--compact"} {...cardProps}>
               <strong>{match.playerA}</strong>
               <span>vs</span>
               <strong>{match.playerB}</strong>
-              <Badge tone={match.winner ? "success" : "info"}>{match.winner ? `Gana ${match.winner}` : match.status}</Badge>
+              <Badge tone={isDoubleWalkover ? "danger" : match.winner ? "success" : "info"}>{isDoubleWalkover ? "Doble W.O." : match.winner ? `Gana ${match.winner}` : match.status}</Badge>
               {match.result ? <small>{match.result}</small> : null}
             </CardComponent>
           );

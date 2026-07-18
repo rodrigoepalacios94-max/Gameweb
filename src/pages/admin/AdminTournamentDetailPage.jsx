@@ -201,7 +201,7 @@ export function AdminTournamentDetailPage() {
               <button key={match.id} className="tournament-match-row" type="button" onClick={() => setSelectedMatchId(match.id)}>
                 <span>{match.round}</span>
                 <strong>{match.playerA} vs {match.playerB}</strong>
-                <Badge tone={match.status === "Finalizado" ? "success" : match.status === "W.O." ? "warning" : "info"}>{match.status}</Badge>
+                <Badge tone={match.status === "Finalizado" ? "success" : match.status === "Doble W.O." ? "danger" : match.status === "W.O." ? "warning" : "info"}>{match.status}</Badge>
               </button>
             ))}
           </div>

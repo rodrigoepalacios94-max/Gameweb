@@ -64,7 +64,7 @@ export function AdminMatchesPage() {
               <span>{match.round}</span>
               <span>{formatDate(match.date)} {match.time}</span>
               <span>{match.court}</span>
-              <Badge tone={match.status === "Finalizado" ? "success" : match.status === "W.O." ? "warning" : "info"}>{match.status}</Badge>
+              <Badge tone={match.status === "Finalizado" ? "success" : match.status === "Doble W.O." ? "danger" : match.status === "W.O." ? "warning" : "info"}>{match.status}</Badge>
               <Link className="button button--outline-green button--sm" to={`/admin/matches/${match.id}`}>
                 <Eye size={16} />
                 <span>Detalle</span>

@@ -35,7 +35,7 @@ export function PlayerMatchDetailPage() {
           <h1>{match.round}</h1>
           <p>{match.category} / {match.phase}</p>
           <div className="hero-meta-row">
-            <Badge tone={match.status === "Finalizado" ? "success" : match.status === "W.O." ? "warning" : "info"}>{match.status}</Badge>
+            <Badge tone={match.status === "Finalizado" ? "success" : match.status === "Doble W.O." ? "danger" : match.status === "W.O." ? "warning" : "info"}>{match.status}</Badge>
             <span><CalendarDays size={16} /> {formatDate(match.date)} - {match.time}</span>
             <span><MapPin size={16} /> {match.court}</span>
           </div>

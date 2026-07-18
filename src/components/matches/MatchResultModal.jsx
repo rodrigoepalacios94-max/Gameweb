@@ -164,7 +164,7 @@ export function MatchResultModal({ open, matchId, onClose, onSaved }) {
       {!loading && !loadError && match ? (
         <div className="match-result-modal">
           <div className="match-result-modal__meta">
-            <Badge tone={match.status === "Finalizado" ? "success" : match.status === "W.O." || match.status === "Doble W.O." ? "warning" : "info"}>{match.status}</Badge>
+            <Badge tone={match.status === "Finalizado" ? "success" : match.status === "Doble W.O." ? "danger" : match.status === "W.O." ? "warning" : "info"}>{match.status}</Badge>
             <span>{match.tournament}</span>
             <span>{match.category}</span>
             <span>{match.round}</span>

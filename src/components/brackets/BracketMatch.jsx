@@ -11,7 +11,7 @@ function getCompactNote(note = "") {
 }
 
 function getScoreParts(score = "") {
-  if (!score || score === "Pendiente" || score === "A programar" || score === "Programado") return null;
+  if (!score || score === "Pendiente" || score === "A programar" || score === "Programado" || score.includes("W.O.")) return null;
   const sets = score.split("/").map((set) => set.trim()).filter(Boolean);
   const parts = sets.map((set) => set.split("-").map((value) => value.trim()));
   if (!parts.length || parts.some((part) => part.length < 2 || !part[0] || !part[1])) return null;
@@ -22,23 +22,28 @@ function getScoreParts(score = "") {
 }
 
 export function BracketMatch({ match, detailBasePath = "/player/matches", compact = false, onOpen }) {
+  const isDoubleWalkover = Boolean(match.doubleWalkover || match.status === "Doble W.O." || match.score?.includes("Doble W.O."));
   const scores = getScoreParts(match.score);
   const playerANote = getCompactNote(match.playerANote);
   const playerBNote = getCompactNote(match.playerBNote);
-  const matchClassName = compact ? "bracket-match bracket-match--compact" : "bracket-match";
+  const matchClassName = [
+    "bracket-match",
+    compact ? "bracket-match--compact" : null,
+    isDoubleWalkover ? "is-double-walkover" : null,
+  ].filter(Boolean).join(" ");
   const content = (
     <>
-      <div className={match.winner === match.playerA ? "bracket-player is-winner" : "bracket-player"}>
+      <div className={!isDoubleWalkover && match.winner === match.playerA ? "bracket-player is-winner" : "bracket-player"}>
         <span title={match.playerA}>{match.playerA}</span>
         {playerANote ? <small>{playerANote}</small> : null}
         {scores ? <b>{scores.playerA}</b> : null}
       </div>
-      <div className={match.bye ? "bracket-player is-bye" : match.winner === match.playerB ? "bracket-player is-winner" : "bracket-player"}>
+      <div className={match.bye ? "bracket-player is-bye" : !isDoubleWalkover && match.winner === match.playerB ? "bracket-player is-winner" : "bracket-player"}>
         <span title={match.playerB}>{match.playerB === "BYE" ? "BYE" : match.playerB}</span>
         {playerBNote ? <small>{playerBNote}</small> : null}
         {scores ? <b>{scores.playerB}</b> : null}
       </div>
-      {!scores ? <Badge tone={match.walkover ? "warning" : match.bye ? "neutral" : match.winner ? "success" : "info"}>{match.score}</Badge> : null}
+      {!scores ? <Badge tone={isDoubleWalkover ? "danger" : match.walkover ? "warning" : match.bye ? "neutral" : match.winner ? "success" : "info"}>{isDoubleWalkover ? "Doble W.O." : match.score}</Badge> : null}
     </>
   );
 
