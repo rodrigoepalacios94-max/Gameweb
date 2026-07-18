@@ -1,59 +1,167 @@
+import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { CalendarDays, CreditCard, Trophy } from "lucide-react";
+import { CalendarDays, CreditCard, GitBranch, Trophy, UsersRound } from "lucide-react";
+import { Avatar } from "../../components/common/Avatar";
 import { Badge } from "../../components/common/Badge";
-import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
+import { EmptyState } from "../../components/common/EmptyState";
+import { Tabs } from "../../components/common/Tabs";
+import { BracketMatch } from "../../components/brackets/BracketMatch";
 import { mockCategories } from "../../mocks/mockCategories";
+import { playerService } from "../../services/playerService";
+import { matchService } from "../../services/matchService";
 import { tournamentService } from "../../services/tournamentService";
 import { formatCurrency, formatDate } from "../../utils/formatters";
 
 export function PlayerTournamentDetailPage() {
   const { id } = useParams();
   const tournament = tournamentService.getTournamentById(id);
+  const [tab, setTab] = useState("summary");
+  const matches = matchService.getMatchesByTournament(id);
+  const bracket = tournamentService.getTournamentBracket(id);
+  const categories = useMemo(() => mockCategories.filter((category) => tournament?.categories.includes(category.id)), [tournament]);
 
   if (!tournament) {
-    return <Card>Torneo no encontrado.</Card>;
+    return <EmptyState title="Torneo no encontrado" description="La competencia solicitada no existe en los datos mock." />;
   }
 
-  const categories = mockCategories.filter((category) => tournament.categories.includes(category.id));
-  const canRegister = tournament.status === "Inscripciones abiertas";
+  const tabs = [
+    { id: "summary", label: "Resumen" },
+    { id: "participants", label: "Participantes" },
+    { id: "matches", label: "Partidos" },
+    ...(tournament.type === "Eliminacion Directa" || tournament.type === "Preliminar" ? [{ id: "bracket", label: "Cuadro" }] : []),
+    ...(tournament.type === "Zonas" ? [{ id: "standings", label: "Zonas" }] : []),
+  ];
+  const participants = (tournament.participants || []).map((playerId) => playerService.getPlayerById(playerId)).filter(Boolean);
 
   return (
     <div className="page-stack">
-      <header className="detail-hero">
+      <header className="detail-hero tournament-detail-hero">
         <div>
           <span className="eyebrow">{tournament.scoringSystem}</span>
           <h1>{tournament.name}</h1>
           <p>{tournament.description}</p>
+          <div className="hero-meta-row">
+            <Badge tone={tournament.status === "Inscripciones abiertas" ? "success" : tournament.status === "En juego" ? "info" : "neutral"}>{tournament.status}</Badge>
+            <span>{formatDate(tournament.startDate)}</span>
+            <span>{tournament.playerCategoryName}</span>
+            <span>{tournament.type}</span>
+            <span>{formatCurrency(tournament.price)}</span>
+          </div>
         </div>
-        <Badge tone={canRegister ? "success" : "neutral"}>{tournament.status}</Badge>
       </header>
 
-      <div className="detail-grid">
+      <Tabs tabs={tabs} activeTab={tab} onChange={setTab} />
+
+      {tab === "summary" ? (
+        <div className="detail-grid">
+          <Card>
+            <h2>Informacion general</h2>
+            <div className="info-list">
+              <span><CalendarDays size={17} /> Inicio: {formatDate(tournament.startDate)}</span>
+              <span>Semifinales previstas: {formatDate(tournament.semifinalsDate)}</span>
+              <span>Dia de finales: {formatDate(tournament.finalsDate)}</span>
+              <span><Trophy size={17} /> Formato: {tournament.type}</span>
+              <span><CreditCard size={17} /> Precio: {formatCurrency(tournament.price)}</span>
+            </div>
+          </Card>
+          <Card>
+            <h2>Categorias</h2>
+            <div className="badge-cloud">
+              {categories.map((category) => (
+                <Badge key={category.id} tone="info">{category.name} {category.branch}</Badge>
+              ))}
+            </div>
+            <p className="muted">Estado de inscripcion: {tournament.registrationStatus}</p>
+            {tournament.status === "Inscripciones abiertas" ? (
+              <Link className="button button--orange button--lg button--full" to={`/player/tournaments/${id}/register`}>
+                <span>Inscribirme</span>
+              </Link>
+            ) : null}
+          </Card>
+        </div>
+      ) : null}
+
+      {tab === "participants" ? (
         <Card>
-          <h2>Informacion general</h2>
-          <div className="info-list">
-            <span><CalendarDays size={17} /> Inicio: {formatDate(tournament.startDate)}</span>
-            <span>Semifinales: {formatDate(tournament.semifinalsDate)}</span>
-            <span>Dia de finales: {formatDate(tournament.finalsDate)}</span>
-            <span><Trophy size={17} /> Formato: {tournament.type}</span>
-            <span><CreditCard size={17} /> Precio: {formatCurrency(tournament.price)}</span>
-          </div>
-        </Card>
-        <Card>
-          <h2>Categorias</h2>
-          <div className="badge-cloud">
-            {categories.map((category) => (
-              <Badge key={category.id} tone="info">{category.name} {category.branch}</Badge>
+          <h2>Participantes mock</h2>
+          <div className="participant-grid">
+            {participants.map((player) => (
+              <div key={player.id} className="participant-card">
+                <Avatar src={player.avatar} name={player.fullName} />
+                <div>
+                  <strong>{player.fullName}</strong>
+                  <span>{player.categoryName} / #{player.ranking}</span>
+                </div>
+              </div>
             ))}
           </div>
-          <p className="muted">Estado de inscripcion: {tournament.registrationStatus}</p>
         </Card>
-      </div>
+      ) : null}
 
-      <Link className={`button button--primary button--lg ${!canRegister ? "is-disabled" : ""}`} to={`/player/tournaments/${id}/register`}>
-        <span>Inscribirme</span>
-      </Link>
+      {tab === "matches" ? (
+        <Card>
+          <h2>Partidos del torneo</h2>
+          {matches.length ? (
+            <div className="table-list">
+              {matches.map((match) => (
+                <Link key={match.id} className="tournament-match-row" to={`/player/matches/${match.id}`}>
+                  <span>{match.round}</span>
+                  <strong>{match.playerA} vs {match.playerB}</strong>
+                  <Badge tone={match.status === "Finalizado" ? "success" : match.status === "W.O." ? "warning" : "info"}>{match.status}</Badge>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="No hay partidos disponibles" description="El cronograma todavia no fue publicado para este torneo." />
+          )}
+        </Card>
+      ) : null}
+
+      {tab === "bracket" ? (
+        <Card>
+          <div className="section-title">
+            <span>Cuadro / llave</span>
+            <GitBranch size={18} />
+          </div>
+          {bracket ? (
+            <div className="bracket-scroll" aria-label="Cuadro del torneo">
+              <div className="bracket-board">
+                {bracket.rounds.map((round) => (
+                  <section key={round.id} className="bracket-round">
+                    <h3>{round.name}</h3>
+                    {round.matches.map((match) => (
+                      <BracketMatch key={match.id} match={match} />
+                    ))}
+                  </section>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <EmptyState title="Cuadro no disponible" description="La llave mock todavia no fue generada para este torneo." />
+          )}
+        </Card>
+      ) : null}
+
+      {tab === "standings" ? (
+        <Card>
+          <h2>Zonas y clasificacion</h2>
+          <div className="zone-grid">
+            <div className="zone-card">
+              <strong>Zona A</strong>
+              <span>Tomas Lescano - 2 PG</span>
+              <span>Federico Ramos - 1 PG</span>
+              <span>Sebastian Gallardo - pendiente</span>
+            </div>
+            <div className="zone-card">
+              <strong>Zona B</strong>
+              <span>Nicolas Pereyra - 2 PG</span>
+              <span>Diego Soria - 0 PG</span>
+            </div>
+          </div>
+          <p className="muted">Los criterios de desempate definitivos quedan para la etapa de algoritmo/backend.</p>
+        </Card>
+      ) : null}
     </div>
   );
 }

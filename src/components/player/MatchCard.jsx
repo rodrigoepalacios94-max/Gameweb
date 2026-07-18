@@ -1,4 +1,5 @@
 import { Clock, MapPin } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Avatar } from "../common/Avatar";
 import { Badge } from "../common/Badge";
 import { Card } from "../common/Card";
@@ -30,6 +31,9 @@ export function MatchCard({ match }) {
         </div>
         {match.result ? <strong className="result">Resultado: {match.result}</strong> : null}
       </div>
+      <Link className="button button--outline-green button--md" to={`/player/matches/${match.id}`}>
+        <span>Ver detalle</span>
+      </Link>
     </Card>
   );
 }

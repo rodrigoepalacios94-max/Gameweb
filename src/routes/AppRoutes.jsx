@@ -14,6 +14,7 @@ import { AdminTournamentCreatePage } from "../pages/admin/AdminTournamentCreateP
 import { AdminTournamentsPage } from "../pages/admin/AdminTournamentsPage";
 import { PlayerHomePage } from "../pages/player/PlayerHomePage";
 import { PlayerMatchesPage } from "../pages/player/PlayerMatchesPage";
+import { PlayerMatchDetailPage } from "../pages/player/PlayerMatchDetailPage";
 import { PlayerNotificationsPage } from "../pages/player/PlayerNotificationsPage";
 import { PlayerProfilePage } from "../pages/player/PlayerProfilePage";
 import { PlayerRankingPage } from "../pages/player/PlayerRankingPage";
@@ -37,6 +38,7 @@ export function AppRoutes() {
         <Route path="tournaments/:id/register" element={<PlayerTournamentRegistrationPage />} />
         <Route path="ranking" element={<PlayerRankingPage />} />
         <Route path="matches" element={<PlayerMatchesPage />} />
+        <Route path="matches/:id" element={<PlayerMatchDetailPage />} />
         <Route path="notifications" element={<PlayerNotificationsPage />} />
         <Route path="profile" element={<PlayerProfilePage />} />
       </Route>

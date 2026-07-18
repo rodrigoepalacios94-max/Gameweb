@@ -81,7 +81,7 @@ export function PlayerHomePage() {
                 <MapPin size={17} /> {nextMatch.court}
               </span>
             </div>
-            <Link className="button button--orange button--lg button--full" to="/player/matches">
+            <Link className="button button--orange button--lg button--full" to={`/player/matches/${nextMatch.id}`}>
               <span>Ver partido</span>
             </Link>
           </Card>

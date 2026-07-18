@@ -14,7 +14,7 @@ const statusTone = {
 
 export function TournamentCard({ tournament, to, actions }) {
   return (
-    <Card className="tournament-card">
+    <Card className="tournament-card tournament-card--premium">
       <div className="tournament-card__top">
         <Trophy size={22} />
         <Badge tone={statusTone[tournament.status] || "neutral"}>{tournament.status}</Badge>
@@ -28,9 +28,11 @@ export function TournamentCard({ tournament, to, actions }) {
         <span>{tournament.type}</span>
         <span>{tournament.scoringSystem}</span>
         <span>{formatCurrency(tournament.price)}</span>
+        {tournament.playerCategoryName ? <span>{tournament.playerCategoryName}</span> : null}
+        {tournament.registrationStatus ? <span>{tournament.registrationStatus}</span> : null}
       </div>
       {to ? (
-        <Link className="button button--secondary button--md" to={to}>
+        <Link className="button button--outline-green button--md" to={to}>
           <span>Ver torneo</span>
         </Link>
       ) : null}

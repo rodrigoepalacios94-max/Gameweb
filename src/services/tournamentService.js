@@ -1,4 +1,5 @@
 import { mockTournaments } from "../mocks/mockTournaments";
+import { mockBrackets } from "../mocks/mockBrackets";
 
 export const tournamentService = {
   getTournaments() {
@@ -6,6 +7,9 @@ export const tournamentService = {
   },
   getTournamentById(id) {
     return mockTournaments.find((tournament) => tournament.id === id);
+  },
+  getTournamentBracket(id) {
+    return mockBrackets[id] || null;
   },
   createMockRegistration(payload) {
     return {
