@@ -1,5 +1,6 @@
 import { create34PlayerTestTournament, getTestTournamentDiagnostics as getDevTestTournamentDiagnostics, isTestTournamentName, simulatePreliminaryResults } from "../dev/tournamentTestFactory";
 import { createMockId, mutateMockData, readMockData } from "../mocks/mockDatabase";
+import { DEFAULT_MATCH_FORMAT } from "../utils/matchFormat";
 import { auditService } from "./auditService";
 import { mockRequest } from "./serviceUtils";
 
@@ -40,6 +41,7 @@ export const tournamentService = {
               phases: [],
               categories: [],
               courts: [],
+              matchFormat: payload.matchFormat || DEFAULT_MATCH_FORMAT,
               ...payload,
             };
             db.tournaments.push(created);

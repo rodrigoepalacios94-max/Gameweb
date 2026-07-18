@@ -10,6 +10,7 @@ import { MatchScore } from "../../components/player/MatchScore";
 import { useAsyncData } from "../../hooks/useAsyncData";
 import { matchService } from "../../services/matchService";
 import { formatDate } from "../../utils/formatters";
+import { describeMatchFormat } from "../../utils/matchFormat";
 
 export function PlayerMatchDetailPage() {
   const { id } = useParams();
@@ -24,6 +25,7 @@ export function PlayerMatchDetailPage() {
 
   const winnerName = match.winnerId === match.playerAId ? match.playerA : match.winnerId === match.playerBId ? match.playerB : null;
   const walkoverName = match.walkoverPlayerId === match.playerAId ? match.playerA : match.walkoverPlayerId === match.playerBId ? match.playerB : null;
+  const formatDescription = describeMatchFormat(match.matchFormat);
 
   return (
     <div className="page-stack">
@@ -74,7 +76,13 @@ export function PlayerMatchDetailPage() {
           </div>
         </Card>
         <Card>
-          <h2>Disciplina del partido</h2>
+          <h2>Formato y disciplina</h2>
+          <div className="info-list">
+            <span>Sets: {formatDescription.sets}</span>
+            <span>Games: {formatDescription.games}</span>
+            <span>Set decisivo: {formatDescription.decidingSet}</span>
+            <span>Estado: {match.status}</span>
+          </div>
           {match.discipline?.claims?.length ? (
             <div className="compact-list">
               {match.discipline.claims.map((claim) => (

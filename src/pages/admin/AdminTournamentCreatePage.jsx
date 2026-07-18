@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CalendarDays, CheckCircle2, Clock, GitBranch, Send, Trash2, UsersRound, X } from "lucide-react";
+import { CalendarDays, CheckCircle2, Clock, GitBranch, Send, Trash2, Trophy, UsersRound, X } from "lucide-react";
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
@@ -12,6 +12,7 @@ import { adminService } from "../../services/adminService";
 import { categoryService } from "../../services/categoryService";
 import { tournamentService } from "../../services/tournamentService";
 import { formatDate } from "../../utils/formatters";
+import { DEFAULT_MATCH_FORMAT, MATCH_FORMAT_OPTIONS, describeMatchFormat } from "../../utils/matchFormat";
 
 const steps = [
   { id: "general", label: "General" },
@@ -38,6 +39,7 @@ const initialForm = {
   price: 18000,
   scoringSystem: "GAME 1000",
   type: "Preliminar",
+  matchFormat: DEFAULT_MATCH_FORMAT,
 };
 
 function hasDuplicatedTimes(times) {
@@ -88,6 +90,18 @@ export function AdminTournamentCreatePage() {
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateMatchFormat(field, value) {
+    setForm((current) => ({
+      ...current,
+      matchFormat: {
+        ...current.matchFormat,
+        [field]: value,
+        ...(field === "useSuperTiebreak" && !value ? { superTiebreakInDecidingSet: false } : {}),
+        ...(field === "useSuperTiebreak" && value ? { superTiebreakInDecidingSet: true } : {}),
+      },
+    }));
   }
 
   function toggleCategory(categoryId) {
@@ -206,14 +220,48 @@ export function AdminTournamentCreatePage() {
         ) : null}
 
         {activeStep === "format" ? (
-          <div className="option-grid">
-            {settings.tournamentTypes.map((format) => (
-              <button key={format} className={form.type === format ? "category-option is-selected" : "category-option"} type="button" onClick={() => updateField("type", format)}>
-                <GitBranch size={20} />
-                <strong>{format}</strong>
-                <span>{formatDescriptions[format]}</span>
-              </button>
-            ))}
+          <div className="page-stack compact">
+            <div className="option-grid">
+              {settings.tournamentTypes.map((format) => (
+                <button key={format} className={form.type === format ? "category-option is-selected" : "category-option"} type="button" onClick={() => updateField("type", format)}>
+                  <GitBranch size={20} />
+                  <strong>{format}</strong>
+                  <span>{formatDescriptions[format]}</span>
+                </button>
+              ))}
+            </div>
+            <section className="match-format-panel">
+              <div className="section-title">
+                <span>Formato de partido</span>
+                <Badge tone="info">{describeMatchFormat(form.matchFormat).sets}</Badge>
+              </div>
+              <div className="form-grid">
+                <label>Cantidad de sets
+                  <select value={form.matchFormat.bestOfSets} onChange={(event) => updateMatchFormat("bestOfSets", Number(event.target.value))}>
+                    {MATCH_FORMAT_OPTIONS.bestOfSets.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </label>
+                <label>Games por set
+                  <select value={form.matchFormat.gamesPerSet} onChange={(event) => updateMatchFormat("gamesPerSet", Number(event.target.value))}>
+                    {MATCH_FORMAT_OPTIONS.gamesPerSet.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </label>
+                <label>Super Tie-Break
+                  <select value={form.matchFormat.useSuperTiebreak ? "yes" : "no"} onChange={(event) => updateMatchFormat("useSuperTiebreak", event.target.value === "yes")}>
+                    <option value="yes">Si</option>
+                    <option value="no">No</option>
+                  </select>
+                </label>
+                {form.matchFormat.useSuperTiebreak ? (
+                  <label>Set decisivo
+                    <select value={form.matchFormat.superTiebreakInDecidingSet ? "deciding" : "none"} onChange={(event) => updateMatchFormat("superTiebreakInDecidingSet", event.target.value === "deciding")}>
+                      <option value="deciding">En lugar del set decisivo</option>
+                      <option value="none">No reemplaza ningun set</option>
+                    </select>
+                  </label>
+                ) : null}
+              </div>
+            </section>
           </div>
         ) : null}
 
@@ -253,6 +301,11 @@ export function AdminTournamentCreatePage() {
             </SummarySection>
             <SummarySection title="Formato" icon={GitBranch}>
               <span>{form.type}</span>
+            </SummarySection>
+            <SummarySection title="Formato de partido" icon={Trophy}>
+              <span>Sets: {describeMatchFormat(form.matchFormat).sets}</span>
+              <span>Games por set: {form.matchFormat.gamesPerSet}</span>
+              <span>Set decisivo: {describeMatchFormat(form.matchFormat).decidingSet}</span>
             </SummarySection>
             <SummarySection title="Categorias" icon={UsersRound}>
               {selectedCategoryNames.length ? selectedCategoryNames.map((name) => <span key={name}>{name}</span>) : <span>Sin categorias seleccionadas</span>}

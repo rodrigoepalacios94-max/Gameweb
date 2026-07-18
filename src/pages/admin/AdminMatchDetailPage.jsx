@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { AlertTriangle, CalendarDays, Edit3, MapPin, Trophy } from "lucide-react";
+import { AlertTriangle, CalendarDays, Edit3, MapPin, Save, Trophy } from "lucide-react";
 import { Avatar } from "../../components/common/Avatar";
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
@@ -14,20 +14,52 @@ import { MatchScore } from "../../components/player/MatchScore";
 import { useAsyncData } from "../../hooks/useAsyncData";
 import { matchService } from "../../services/matchService";
 import { formatDate } from "../../utils/formatters";
+import { describeMatchFormat, getMatchFormatRows } from "../../utils/matchFormat";
+
+function buildRows(match) {
+  const formatRows = getMatchFormatRows(match.matchFormat);
+  return formatRows.map((row, index) => {
+    const existing = match.sets?.[index];
+    return {
+      ...row,
+      playerAScore: existing?.playerAScore ?? existing?.a ?? "",
+      playerBScore: existing?.playerBScore ?? existing?.b ?? "",
+    };
+  });
+}
+
+function normalizeRows(rows) {
+  return rows
+    .filter((row) => row.playerAScore !== "" || row.playerBScore !== "")
+    .map((row) => ({
+      type: row.type,
+      playerAScore: row.playerAScore === "" ? "" : Number(row.playerAScore),
+      playerBScore: row.playerBScore === "" ? "" : Number(row.playerBScore),
+    }));
+}
 
 export function AdminMatchDetailPage() {
   const { id } = useParams();
   const [modal, setModal] = useState(null);
-  const [winnerId, setWinnerId] = useState("");
-  const [walkoverPlayerId, setWalkoverPlayerId] = useState("");
+  const [resultRows, setResultRows] = useState([]);
+  const [formError, setFormError] = useState("");
+  const [walkoverMode, setWalkoverMode] = useState("playerA");
   const { data: match, loading, error, reload } = useAsyncData(() => matchService.getMatchById(id), [id]);
 
   useEffect(() => {
     if (match) {
-      setWinnerId(match.winnerId || match.playerAId || "");
-      setWalkoverPlayerId(match.walkoverPlayerId || match.playerBId || "");
+      setResultRows(buildRows(match));
+      setWalkoverMode(match.walkoverPlayerId === match.playerBId ? "playerB" : "playerA");
+      setFormError("");
     }
   }, [match]);
+
+  const resultPreview = useMemo(() => {
+    if (!match) return null;
+    const filledRows = normalizeRows(resultRows);
+    if (!filledRows.length) return null;
+    return matchService.calculateMatchWinner({ ...match, sets: filledRows });
+  }, [match, resultRows]);
 
   if (loading) return <LoadingState message="Cargando detalle de partido..." />;
   if (error) return <ErrorState title="No pudimos cargar el partido admin." onRetry={reload} />;
@@ -37,19 +69,42 @@ export function AdminMatchDetailPage() {
   }
 
   const winnerName = match.winnerId === match.playerAId ? match.playerA : match.winnerId === match.playerBId ? match.playerB : "Pendiente";
-  const playerOptions = [
-    { value: match.playerAId, label: match.playerA },
-    { value: match.playerBId, label: match.playerB },
+  const walkoverOptions = [
+    { value: "playerA", label: `W.O. ${match.playerA}` },
+    { value: "playerB", label: `W.O. ${match.playerB}` },
+    { value: "double", label: "Doble W.O." },
   ];
+  const formatDescription = describeMatchFormat(match.matchFormat);
 
-  async function saveResult() {
-    await matchService.saveResult(match.id, { winnerId });
+  function updateResultRow(index, field, value) {
+    setResultRows((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)));
+  }
+
+  async function savePartial() {
+    setFormError("");
+    await matchService.savePartialResult(match.id, { sets: normalizeRows(resultRows) });
+    setModal(null);
+    reload();
+  }
+
+  async function finalizeResult() {
+    setFormError("");
+    const rows = normalizeRows(resultRows);
+    const preview = matchService.calculateMatchWinner({ ...match, sets: rows });
+    if (!preview.valid) {
+      setFormError(preview.error);
+      return;
+    }
+    const action = match.status === "Finalizado" || match.status === "W.O." ? matchService.editResult : matchService.finalizeMatch;
+    await action.call(matchService, match.id, { sets: rows });
     setModal(null);
     reload();
   }
 
   async function saveWalkover() {
-    await matchService.registerWalkover(match.id, { walkoverPlayerId });
+    const doubleWalkover = walkoverMode === "double";
+    const walkoverPlayerId = walkoverMode === "playerA" ? match.playerAId : walkoverMode === "playerB" ? match.playerBId : null;
+    await matchService.registerWalkover(match.id, { walkoverPlayerId, doubleWalkover });
     setModal(null);
     reload();
   }
@@ -68,7 +123,7 @@ export function AdminMatchDetailPage() {
           <h1>{match.round}</h1>
           <p>{match.category} / {match.phase}</p>
           <div className="hero-meta-row">
-            <Badge tone={match.status === "Finalizado" ? "success" : match.status === "W.O." ? "warning" : "info"}>{match.status}</Badge>
+            <Badge tone={match.status === "Finalizado" ? "success" : match.status === "W.O." || match.status === "Doble W.O." ? "warning" : "info"}>{match.status}</Badge>
             <span><CalendarDays size={16} /> {formatDate(match.date)} - {match.time}</span>
             <span><MapPin size={16} /> {match.court}</span>
           </div>
@@ -93,9 +148,9 @@ export function AdminMatchDetailPage() {
       </Card>
 
       <div className="card-actions">
-        <Button icon={Trophy} onClick={() => setModal("result")}>Cargar resultado</Button>
+        <Button icon={Trophy} onClick={() => setModal("result")}>{match.result ? "Editar resultado" : "Cargar resultado"}</Button>
         <Button variant="secondary" icon={AlertTriangle} onClick={() => setModal("walkover")}>Registrar W.O.</Button>
-        <Button variant="ghost" icon={Edit3} onClick={() => setModal("schedule")}>Modificar programacion</Button>
+        <Button variant="ghost" icon={Edit3} onClick={() => setModal("schedule")}>Reprogramar</Button>
       </div>
 
       <div className="detail-grid">
@@ -103,6 +158,8 @@ export function AdminMatchDetailPage() {
           <h2>Estado deportivo</h2>
           <div className="info-list">
             <span>Torneo: {match.tournament}</span>
+            <span>Categoria: {match.category}</span>
+            <span>Ronda: {match.round}</span>
             <span>Fecha: {formatDate(match.date)}</span>
             <span>Hora: {match.time}</span>
             <span>Cancha: {match.court}</span>
@@ -111,45 +168,64 @@ export function AdminMatchDetailPage() {
           </div>
         </Card>
         <Card>
-          <h2>Auditoria y disciplina</h2>
+          <h2>Formato de partido</h2>
           <div className="info-list">
-            <span>Los resultados pueden corregirse solo por el profesor.</span>
-            <span>Toda modificacion importante debera registrarse en historial cuando exista backend.</span>
-            <span>Reclamos: {match.discipline?.claims?.length || 0}</span>
-            <span>Faltas confirmadas: {match.discipline?.confirmedFaults?.length || 0}</span>
+            <span>Sets: {formatDescription.sets}</span>
+            <span>Games por set: {formatDescription.games}</span>
+            <span>Set decisivo: {formatDescription.decidingSet}</span>
           </div>
         </Card>
       </div>
 
-      <Modal open={modal === "result"} title="Cargar resultado" onClose={() => setModal(null)}>
+      <Modal open={modal === "result"} title={match.result ? "Editar resultado" : "Cargar resultado"} onClose={() => setModal(null)}>
         <div className="page-stack compact">
-          <Select label="Ganador" value={winnerId} onChange={setWinnerId} options={playerOptions} />
-          <div className="form-grid">
-            <label>Set 1<input defaultValue="6-4" /></label>
-            <label>Set 2<input defaultValue="7-5" /></label>
-            <label>Super tie-break<input placeholder="Opcional" /></label>
+          <div className="result-entry">
+            <div className="result-entry__head">
+              <span>Set</span>
+              <strong>{match.playerA}</strong>
+              <strong>{match.playerB}</strong>
+            </div>
+            {resultRows.map((row, index) => (
+              <div key={row.label} className={row.type === "super_tiebreak" ? "result-entry__row is-super" : "result-entry__row"}>
+                <strong>{row.type === "super_tiebreak" ? "SUPER TIE-BREAK" : row.label}</strong>
+                <input type="number" min="0" value={row.playerAScore} onChange={(event) => updateResultRow(index, "playerAScore", event.target.value)} />
+                <input type="number" min="0" value={row.playerBScore} onChange={(event) => updateResultRow(index, "playerBScore", event.target.value)} />
+              </div>
+            ))}
           </div>
-          <p className="mock-note">Validacion visual: el profesor ingresa sets, games y super tie-break si corresponde. El ganador se determina en esta version por seleccion mock.</p>
-          <Button onClick={saveResult}>Confirmar resultado</Button>
+          {resultPreview?.valid ? (
+            <div className="winner-preview">
+              <span>Ganador</span>
+              <strong>{resultPreview.winnerId === match.playerAId ? match.playerA : match.playerB}</strong>
+            </div>
+          ) : resultPreview?.error ? (
+            <p className="field-error">{resultPreview.error}</p>
+          ) : null}
+          {formError ? <p className="field-error">{formError}</p> : null}
+          <div className="card-actions">
+            <Button variant="ghost" icon={Save} onClick={savePartial}>Guardar parcial</Button>
+            <Button onClick={finalizeResult}>Finalizar partido</Button>
+          </div>
         </div>
       </Modal>
 
       <Modal open={modal === "walkover"} title="Registrar W.O." onClose={() => setModal(null)}>
         <div className="page-stack compact">
-          <Select label="Jugador que no se presenta" value={walkoverPlayerId} onChange={setWalkoverPlayerId} options={playerOptions} />
-          <p className="mock-note">El W.O. actualiza visualmente ganador y estado. Puntos y llave quedan indicados como consecuencia deportiva pendiente de motor real.</p>
+          <Select label="Tipo de W.O." value={walkoverMode} onChange={setWalkoverMode} options={walkoverOptions} />
+          <p className="mock-note">
+            En doble W.O. el partido queda pendiente de resolucion y no avanza ningun jugador automaticamente.
+          </p>
           <Button variant="secondary" onClick={saveWalkover}>Confirmar W.O.</Button>
         </div>
       </Modal>
 
-      <Modal open={modal === "schedule"} title="Modificar fecha, hora o cancha" onClose={() => setModal(null)}>
+      <Modal open={modal === "schedule"} title="Reprogramar partido" onClose={() => setModal(null)}>
         <div className="page-stack compact">
           <div className="form-grid">
             <label>Fecha<input type="date" defaultValue="2026-07-20" /></label>
             <label>Hora<input defaultValue="12:00" /></label>
             <label>Cancha<select defaultValue="Cancha 3"><option>Cancha 1</option><option>Cancha 2</option><option>Cancha 3</option></select></label>
           </div>
-          <p className="mock-note">La interfaz representa la revision de conflictos de horario, cancha, jugadores y descanso. En esta etapa permite guardar bajo responsabilidad del profesor.</p>
           <Button variant="outline-green" onClick={saveSchedule}>Guardar reprogramacion</Button>
         </div>
       </Modal>
