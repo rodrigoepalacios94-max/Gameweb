@@ -1,0 +1,10 @@
+{
+  "name": "GAME",
+  "short_name": "GAME",
+  "description": "Gestion deportiva para torneos de tenis.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0c0d0f",
+  "theme_color": "#cfdb2f",
+  "icons": []
+}
