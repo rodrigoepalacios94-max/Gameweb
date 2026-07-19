@@ -1200,3 +1200,27 @@ Ejemplos:
 
 Dentro de cada zona todos juegan contra todos.
 La fase eliminatoria posterior se genera despues de conocer los clasificados de cada zona.
+
+## DETALLE ADMINISTRATIVO DE TORNEO POR CATEGORIA
+
+En el detalle administrativo de un torneo, el selector de categoria ubicado arriba de la navegacion define el alcance de las secciones principales visibles.
+
+La navegacion principal del detalle debe mantenerse acotada a:
+
+- Cuadro.
+- Partidos.
+- Participantes.
+- Programacion.
+- Disciplina.
+
+No deben existir pestanas principales permanentes de Formatos, Inscripciones o Resumen.
+
+La informacion de resumen del torneo debe vivir en el encabezado y en la configuracion administrativa del torneo.
+
+La configuracion de formatos por categoria se realiza desde la accion Ajustes del encabezado. Al cerrar inscripciones, GAME cuenta los participantes por categoria, propone o permite seleccionar el formato correspondiente y luego confirma/genera los cuadros por categoria segun la logica vigente.
+
+Las secciones Cuadro, Partidos, Participantes, Programacion y Disciplina deben mostrar datos de la categoria seleccionada, sin mezclar informacion de otras categorias del mismo torneo.
+
+Las suspensiones de resto de jornada y fin de semana se ejecutan desde Ajustes o desde Programacion, siempre con confirmacion visual del sistema antes de aplicar las reglas existentes de suspension y reprogramacion.
+
+La accion Finalizar torneo debe estar visible en el encabezado como accion critica. Si quedan partidos sin finalizar, GAME debe mostrar una confirmacion explicita indicando la cantidad de partidos pendientes. Si el profesor confirma, el torneo puede cerrarse igualmente, sin inventar resultados ni modificar automaticamente partidos pendientes.

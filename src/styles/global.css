@@ -320,6 +320,17 @@ img {
   gap: var(--space-4);
 }
 
+.tournament-detail-hero {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.tournament-admin-actions {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: stretch;
+  min-width: 220px;
+}
+
 .admin-hero h1 {
   margin-bottom: var(--space-3);
 }
@@ -571,6 +582,18 @@ img {
   border-color: rgba(241, 133, 35, 0.5);
   background: rgba(241, 133, 35, 0.12);
   color: var(--color-text);
+}
+
+.button--danger {
+  border-color: rgba(255, 72, 90, 0.58);
+  background: rgba(255, 72, 90, 0.13);
+  color: var(--color-text);
+  box-shadow: 0 12px 30px rgba(255, 72, 90, 0.1);
+}
+
+.button--danger:hover {
+  background: rgba(255, 72, 90, 0.2);
+  box-shadow: 0 14px 34px rgba(255, 72, 90, 0.18);
 }
 
 .button--outline-green {
@@ -2720,8 +2743,14 @@ button.preliminary-card--compact:hover {
 
   .profile-header,
   .player-hero,
-  .admin-hero {
+  .admin-hero,
+  .tournament-detail-hero {
     grid-template-columns: 1fr;
+  }
+
+  .tournament-admin-actions {
+    justify-items: flex-start;
+    min-width: 0;
   }
 
   .player-hero,

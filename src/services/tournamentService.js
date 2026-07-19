@@ -119,6 +119,26 @@ export const tournamentService = {
   async cancelTournament(id, actor = "admin-1") {
     return this.updateTournament(id, { status: "Cancelado" }, actor);
   },
+  async finalizeTournament(id, { pendingCount = 0 } = {}, actor = "admin-1") {
+    return mockRequest(async () => {
+      const tournament = mutateMockData((db) => {
+        const target = db.tournaments.find((item) => item.id === id);
+        if (!target) return null;
+        target.status = "Finalizado";
+        target.finalizedAt = new Date().toISOString();
+        target.finalizedWithPendingMatches = pendingCount;
+        return target;
+      });
+      await auditService.record({
+        action: "finalize_tournament",
+        entityType: "tournament",
+        entityId: id,
+        description: pendingCount ? `Torneo finalizado con ${pendingCount} partidos pendientes.` : "Torneo finalizado sin partidos pendientes.",
+        actor,
+      });
+      return tournament;
+    }, "No pudimos finalizar el torneo.");
+  },
   async simulateTestPreliminaries(id, categoryId = null, actor = "admin-1") {
     return mockRequest(async () => {
       const result = simulatePreliminaryResults(id, categoryId);

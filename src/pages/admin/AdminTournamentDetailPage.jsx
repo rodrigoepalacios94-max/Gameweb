@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { ArrowLeft, CalendarDays, CalendarX, CloudRain, CreditCard, GitBranch, RefreshCw, ShieldAlert, UsersRound } from "lucide-react";
+import { ArrowLeft, CalendarDays, CalendarX, CloudRain, GitBranch, RefreshCw, Settings, ShieldAlert, Trophy, UsersRound } from "lucide-react";
 import { Avatar } from "../../components/common/Avatar";
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
@@ -8,6 +8,7 @@ import { Card } from "../../components/common/Card";
 import { EmptyState } from "../../components/common/EmptyState";
 import { ErrorState } from "../../components/common/ErrorState";
 import { LoadingState } from "../../components/common/LoadingState";
+import { Modal } from "../../components/common/Modal";
 import { Tabs } from "../../components/common/Tabs";
 import { PreliminaryMatches } from "../../components/brackets/PreliminaryMatches";
 import { TournamentBracket } from "../../components/brackets/TournamentBracket";
@@ -22,33 +23,41 @@ import { tournamentService } from "../../services/tournamentService";
 import { formatCurrency, formatDate } from "../../utils/formatters";
 import { TOURNAMENT_FORMATS } from "../../services/tournamentCategoryService";
 
+const FINAL_MATCH_STATUSES = new Set(["Finalizado", "W.O.", "W.O"]);
+
 export function AdminTournamentDetailPage() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const [tab, setTab] = useState(() => searchParams.get("tab") || "bracket");
   const [selectedCategoryId, setSelectedCategoryId] = useState(() => searchParams.get("category") || "");
   const [selectedMatchId, setSelectedMatchId] = useState(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [confirmSuspendDayOpen, setConfirmSuspendDayOpen] = useState(false);
+  const [confirmSuspendWeekendOpen, setConfirmSuspendWeekendOpen] = useState(false);
+  const [finishModalOpen, setFinishModalOpen] = useState(false);
   const { data, loading, error, reload } = useAsyncData(async () => {
     const tournament = await tournamentService.getTournamentById(id);
     const stages = tournament ? await tournamentService.getTournamentCategoryStages(id) : [];
     const activeCategoryId = selectedCategoryId || tournament?.playerCategoryId || stages[0]?.categoryId || null;
-    const [matches, bracket, registrations, scheduleInfo, participants, categories, claims, players] = await Promise.all([
+    const [matches, allMatches, bracket, registrations, scheduleInfo, participants, categories, claims, faults, players] = await Promise.all([
       matchService.getMatchesByTournament(id, activeCategoryId),
+      matchService.getMatchesByTournament(id),
       tournamentService.getTournamentBracket(id, activeCategoryId),
       enrollmentService.getEnrollmentsByTournament(id),
       schedulingService.getScheduleByTournament(id),
       tournamentService.getTournamentParticipants(id, activeCategoryId),
       tournamentService.getTournamentCategories(id),
       disciplineService.getClaims(),
+      disciplineService.getFaults(),
       playerService.getPlayers(),
     ]);
-    return { tournament, stages, activeCategoryId, matches, bracket, registrations, scheduleInfo, participants, categories, claims, players };
+    return { tournament, stages, activeCategoryId, matches, allMatches, bracket, registrations, scheduleInfo, participants, categories, claims, faults, players };
   }, [id, selectedCategoryId]);
 
   if (loading) return <LoadingState message="Cargando detalle de torneo..." />;
   if (error) return <ErrorState title="No pudimos cargar el detalle de torneo." onRetry={reload} />;
 
-  const { tournament, stages, activeCategoryId, matches, bracket, registrations, scheduleInfo, participants, categories, claims, players } = data;
+  const { tournament, stages, activeCategoryId, matches, allMatches, bracket, registrations, scheduleInfo, participants, categories, claims, faults, players } = data;
 
   if (!tournament) {
     return <EmptyState title="Torneo no encontrado" description="No existe un torneo admin con ese identificador mock." />;
@@ -56,17 +65,28 @@ export function AdminTournamentDetailPage() {
 
   const tabs = [
     { id: "bracket", label: "Cuadro" },
-    { id: "formats", label: "Formatos" },
     { id: "matches", label: "Partidos" },
     { id: "participants", label: "Participantes" },
-    { id: "registrations", label: "Inscripciones" },
     { id: "schedule", label: "Programacion" },
-    { id: "summary", label: "Resumen" },
     { id: "discipline", label: "Disciplina" },
   ];
   const activeTab = tabs.some((item) => item.id === tab) ? tab : "bracket";
   const activeStage = stages.find((stage) => stage.categoryId === activeCategoryId) || stages[0];
-  const categoryRegistrations = registrations.filter((registration) => registration.categoryId === activeCategoryId);
+  const categoryScheduleSlots = (scheduleInfo.slots || []).filter((slot) => slot.categoryId === activeCategoryId);
+  const categoryDistribution = (scheduleInfo.distribution || []).filter((item) => item.categoryId === activeCategoryId);
+  const categoryPlayerIds = new Set(participants.map((player) => player.id));
+  const categoryPlayerNames = new Set(participants.map((player) => player.fullName));
+  const categoryMatchIds = new Set(matches.map((match) => match.id));
+  const categoryClaims = claims.filter((claim) =>
+    claim.categoryId === activeCategoryId ||
+    categoryMatchIds.has(claim.matchId) ||
+    categoryPlayerIds.has(claim.reportedPlayerId) ||
+    categoryPlayerIds.has(claim.claimantPlayerId) ||
+    categoryPlayerNames.has(claim.reportedPlayer) ||
+    categoryPlayerNames.has(claim.claimant)
+  );
+  const categoryFaults = faults.filter((fault) => categoryPlayerIds.has(fault.playerId));
+  const pendingMatchesCount = allMatches.filter((match) => !FINAL_MATCH_STATUSES.has(match.status)).length;
 
   async function simulatePreliminaries() {
     await tournamentService.simulateTestPreliminaries(tournament.id, activeCategoryId);
@@ -86,6 +106,7 @@ export function AdminTournamentDetailPage() {
 
   async function confirmAllFormats() {
     await tournamentService.confirmAllCategoryFormats(tournament.id);
+    setSettingsOpen(false);
     setTab("bracket");
     reload();
   }
@@ -103,13 +124,24 @@ export function AdminTournamentDetailPage() {
 
   async function suspendDay() {
     await schedulingService.suspendDay(tournament.id, tournament.startDate, null, "Lluvia o imprevisto de jornada");
+    setConfirmSuspendDayOpen(false);
+    setSettingsOpen(false);
     setTab("schedule");
     reload();
   }
 
   async function suspendWeekend() {
     await schedulingService.suspendWeekend(tournament.id, tournament.startDate, "Suspension de fin de semana completo");
+    setConfirmSuspendWeekendOpen(false);
+    setSettingsOpen(false);
     setTab("schedule");
+    reload();
+  }
+
+  async function finalizeTournament() {
+    await tournamentService.finalizeTournament(tournament.id, { pendingCount: pendingMatchesCount });
+    setFinishModalOpen(false);
+    setTab("bracket");
     reload();
   }
 
@@ -133,6 +165,10 @@ export function AdminTournamentDetailPage() {
             {tournament.isDevTest ? <Badge tone="warning">DEV TEST</Badge> : null}
           </div>
         </div>
+        <div className="tournament-admin-actions">
+          <Button variant="secondary" icon={Settings} onClick={() => setSettingsOpen(true)}>Ajustes</Button>
+          <Button variant="danger" icon={Trophy} disabled={tournament.status === "Finalizado"} onClick={() => setFinishModalOpen(true)}>Finalizar torneo</Button>
+        </div>
       </header>
 
       <Card className="category-nav-card">
@@ -151,107 +187,6 @@ export function AdminTournamentDetailPage() {
       </Card>
 
       <Tabs tabs={tabs} activeTab={activeTab} onChange={setTab} />
-
-      {activeTab === "summary" ? (
-        <div className="detail-grid">
-          <Card>
-            <h2>Datos principales</h2>
-            <div className="info-list">
-              <span>Inicio: {formatDate(tournament.startDate)}</span>
-              <span>Semifinales previstas: {formatDate(tournament.semifinalsDate)}</span>
-              <span>Dia de finales: {formatDate(tournament.finalsDate)}</span>
-              <span>Formato categoria activa: {activeStage?.format || activeStage?.recommendedFormat || "Pendiente"}</span>
-              <span>Sistema de puntaje: {tournament.scoringSystem}</span>
-              <span>Valor de inscripcion: {formatCurrency(tournament.price)}</span>
-              <span>Categorias: {categories.map((category) => `${category.name} ${category.branch}`).join(", ")}</span>
-            </div>
-          </Card>
-          <Card>
-            <h2>Control administrativo</h2>
-            <div className="info-list">
-              <span>Participantes categoria activa: {participants.length}</span>
-              <span>Inscripciones categoria activa: {categoryRegistrations.length}</span>
-              <span>Canchas: {tournament.courts.join(", ")}</span>
-              <span>Edicion: antes de iniciar se pueden modificar todos los datos.</span>
-              <span>En juego: fechas, horarios, canchas, reglamentos y resultados quedan editables.</span>
-            </div>
-            <div className="card-actions">
-              <Button variant="secondary">Editar torneo</Button>
-              <Button variant="outline-green" onClick={closeRegistrations}>Cerrar inscripciones</Button>
-              <Button variant="ghost">Finalizar</Button>
-              <Button variant="ghost">Cancelar</Button>
-            </div>
-          </Card>
-        </div>
-      ) : null}
-
-      {activeTab === "formats" ? (
-        <Card>
-          <div className="section-title">
-            <span>Configurar formatos por categoria</span>
-            <Button variant="outline-green" size="sm" disabled={tournament.status === "Inscripciones abiertas"} onClick={confirmAllFormats}>Confirmar formatos</Button>
-          </div>
-          {tournament.status === "Inscripciones abiertas" ? (
-            <div className="info-band">
-              <strong>Inscripciones abiertas</strong>
-              <span>Cerra inscripciones para que GAME cuente participantes y proponga formatos por categoria.</span>
-              <Button variant="outline-green" size="sm" onClick={closeRegistrations}>Cerrar inscripciones</Button>
-            </div>
-          ) : null}
-          <div className="admin-table">
-            <div className="admin-table-row admin-table-row--formats admin-table-row--head">
-              <strong>Categoria</strong>
-              <span>Participantes</span>
-              <span>Formato sugerido</span>
-            </div>
-            {stages.map((stage) => {
-              const participantCount = registrations.filter((registration) => registration.categoryId === stage.categoryId && registration.status !== "Rechazada").length || stage.inscriptionsCount || 0;
-              const selectedFormat = stage.format || stage.recommendedFormat || "";
-              const hasParticipants = participantCount > 0;
-              return (
-                <div key={stage.categoryId} className="admin-table-row admin-table-row--formats">
-                  <strong>{stage.categoryName}</strong>
-                  <span>{hasParticipants ? participantCount : "Sin inscriptos"}</span>
-                  <div className="format-select-cell">
-                    <select value={selectedFormat} disabled={tournament.status === "Inscripciones abiertas" || !hasParticipants} onChange={(event) => updateFormat(stage.categoryId, event.target.value)}>
-                      <option value="" disabled>Formato pendiente</option>
-                      {TOURNAMENT_FORMATS.map((format) => <option key={format} value={format}>{format}</option>)}
-                    </select>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-      ) : null}
-
-      {activeTab === "registrations" ? (
-        <Card>
-          <div className="section-title">
-            <span>Inscripciones</span>
-            <CreditCard size={18} />
-          </div>
-          {categoryRegistrations.length ? (
-            <div className="admin-table">
-              {categoryRegistrations.map((registration) => {
-                const player = players.find((item) => item.id === registration.playerId);
-                return (
-                  <div key={registration.id} className="admin-table-row admin-table-row--registrations">
-                    <Avatar src={player?.avatar} name={player?.fullName} size="sm" />
-                    <strong>{player?.fullName}</strong>
-                    <span>{registration.categoryName}</span>
-                    <span>{registration.payment}</span>
-                    <Badge tone={registration.status === "Confirmada" ? "success" : registration.status === "Lista de espera" ? "warning" : "info"}>{registration.status}</Badge>
-                    <Button variant="ghost" size="sm">Revisar</Button>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <EmptyState title="Sin inscripciones mock" description="Esta categoria todavia no tiene inscripciones visibles." />
-          )}
-        </Card>
-      ) : null}
 
       {activeTab === "participants" ? (
         <Card>
@@ -276,16 +211,15 @@ export function AdminTournamentDetailPage() {
       {activeTab === "schedule" ? (
         <Card>
           <div className="section-title">
-            <span>Programacion inteligente mock</span>
+            <span>Programacion - {activeStage?.categoryName}</span>
             <div className="card-actions">
               <Button size="sm" icon={RefreshCw} onClick={recalculateSchedule}>Recalcular programacion</Button>
-              <Button size="sm" variant="secondary" icon={CalendarX} onClick={suspendDay}>Suspender jornada</Button>
-              <Button size="sm" variant="ghost" icon={CloudRain} onClick={suspendWeekend}>Suspender fin de semana</Button>
+              <Button size="sm" variant="secondary" icon={CalendarX} onClick={() => setConfirmSuspendDayOpen(true)}>Suspender jornada</Button>
+              <Button size="sm" variant="ghost" icon={CloudRain} onClick={() => setConfirmSuspendWeekendOpen(true)}>Suspender fin de semana</Button>
             </div>
           </div>
-          <p className="muted">Las canchas son compartidas. GAME reparte turnos por carga pendiente, avance relativo y prioridad de rondas finales.</p>
           <div className="distribution-grid">
-            {scheduleInfo.distribution.map((item) => (
+            {categoryDistribution.map((item) => (
               <div key={item.categoryId} className="distribution-card">
                 <strong>{item.categoryName}</strong>
                 <span>{item.programmed} de {item.pending} partidos pendientes programados.</span>
@@ -293,38 +227,46 @@ export function AdminTournamentDetailPage() {
               </div>
             ))}
           </div>
-          <div className="schedule-board">
-            {scheduleInfo.slots.map((slot) => (
-              <div key={slot.id} className="schedule-slot">
-                <span>{slot.weekend} / {slot.date}</span>
-                <strong>{slot.day} / {slot.time}</strong>
-                <small>{slot.court} / {slot.category}</small>
-                <Badge tone="info">{slot.round}</Badge>
-                <p>{slot.players || slot.load}</p>
-                {slot.matchId ? <Link className="inline-link inline-link--compact" to={`/admin/matches/${slot.matchId}`}>Ver partido</Link> : null}
-              </div>
-            ))}
-          </div>
+          {categoryScheduleSlots.length ? (
+            <div className="schedule-board">
+              {categoryScheduleSlots.map((slot) => (
+                <div key={slot.id} className="schedule-slot">
+                  <span>{slot.weekend} / {slot.date}</span>
+                  <strong>{slot.day} / {slot.time}</strong>
+                  <small>{slot.court} / {slot.category}</small>
+                  <Badge tone="info">{slot.round}</Badge>
+                  <p>{slot.players || slot.load}</p>
+                  {slot.matchId ? <Link className="inline-link inline-link--compact" to={`/admin/matches/${slot.matchId}`}>Ver partido</Link> : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="Sin turnos para esta categoria" description="No hay partidos programados para la categoria seleccionada." />
+          )}
         </Card>
       ) : null}
 
       {activeTab === "matches" ? (
         <Card>
-          <h2>Partidos del torneo</h2>
-          <div className="table-list">
-            {matches.map((match) => (
-              <div key={match.id} className="tournament-match-row tournament-match-row--admin">
-                <button className="tournament-match-row__main" type="button" onClick={() => setSelectedMatchId(match.id)}>
-                  <span>{match.round}</span>
-                  <strong>{match.playerA} vs {match.playerB}</strong>
-                  <Badge tone={match.status === "Finalizado" ? "success" : match.status === "Doble W.O." ? "danger" : match.status === "W.O." ? "warning" : "info"}>{match.status}</Badge>
-                </button>
-                {!["Finalizado", "W.O.", "Doble W.O."].includes(match.status) ? (
-                  <Button variant="ghost" size="sm" onClick={() => suspendMatch(match.id)}>Suspender</Button>
-                ) : null}
-              </div>
-            ))}
-          </div>
+          <h2>Partidos - {activeStage?.categoryName}</h2>
+          {matches.length ? (
+            <div className="table-list">
+              {matches.map((match) => (
+                <div key={match.id} className="tournament-match-row tournament-match-row--admin">
+                  <button className="tournament-match-row__main" type="button" onClick={() => setSelectedMatchId(match.id)}>
+                    <span>{match.round}</span>
+                    <strong>{match.playerA} vs {match.playerB}</strong>
+                    <Badge tone={match.status === "Finalizado" ? "success" : match.status === "Doble W.O." ? "danger" : match.status === "W.O." ? "warning" : "info"}>{match.status}</Badge>
+                  </button>
+                  {!["Finalizado", "W.O.", "Doble W.O."].includes(match.status) ? (
+                    <Button variant="ghost" size="sm" onClick={() => suspendMatch(match.id)}>Suspender</Button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="Sin partidos" description="La categoria seleccionada todavia no tiene partidos generados." />
+          )}
         </Card>
       ) : null}
 
@@ -387,19 +329,34 @@ export function AdminTournamentDetailPage() {
       {activeTab === "discipline" ? (
         <Card>
           <div className="section-title">
-            <span>Disciplina del torneo</span>
+            <span>Disciplina - {activeStage?.categoryName}</span>
             <ShieldAlert size={18} />
           </div>
-          <div className="compact-list">
-            {claims.map((claim) => (
-              <Link key={claim.id} className="claim-row" to="/admin/discipline">
-                <strong>{claim.reportedPlayer}</strong>
-                <span>{claim.match}</span>
-                <span>{claim.reason}</span>
-                <Badge tone={claim.status === "Pendiente" ? "warning" : "success"}>{claim.status}</Badge>
-              </Link>
-            ))}
-          </div>
+          {categoryClaims.length || categoryFaults.length ? (
+            <div className="compact-list">
+              {categoryClaims.map((claim) => (
+                <Link key={claim.id} className="claim-row" to="/admin/discipline">
+                  <strong>{claim.reportedPlayer}</strong>
+                  <span>{claim.match}</span>
+                  <span>{claim.reason}</span>
+                  <Badge tone={claim.status === "Pendiente" ? "warning" : "success"}>{claim.status}</Badge>
+                </Link>
+              ))}
+              {categoryFaults.map((fault) => {
+                const player = players.find((item) => item.id === fault.playerId);
+                return (
+                  <Link key={fault.id} className="claim-row" to="/admin/discipline">
+                    <strong>{player?.fullName || "Jugador"}</strong>
+                    <span>{fault.date}</span>
+                    <span>{fault.reason}</span>
+                    <Badge tone="warning">Falta</Badge>
+                  </Link>
+                );
+              })}
+            </div>
+          ) : (
+            <EmptyState title="Sin novedades disciplinarias" description="No hay reclamos ni faltas para la categoria seleccionada." />
+          )}
         </Card>
       ) : null}
       <MatchResultModal
@@ -408,6 +365,93 @@ export function AdminTournamentDetailPage() {
         onClose={() => setSelectedMatchId(null)}
         onSaved={reload}
       />
+      <Modal open={settingsOpen} title="Configuracion del torneo" size="lg" onClose={() => setSettingsOpen(false)}>
+        <div className="match-result-modal">
+          <div className="info-list">
+            <span>Inicio: {formatDate(tournament.startDate)}</span>
+            <span>Semifinales previstas: {formatDate(tournament.semifinalsDate)}</span>
+            <span>Dia de finales: {formatDate(tournament.finalsDate)}</span>
+            <span>Categorias: {categories.map((category) => `${category.name} ${category.branch}`).join(", ")}</span>
+            <span>Canchas: {tournament.courts.join(", ")}</span>
+          </div>
+
+          <div className="section-title">
+            <span>Formatos por categoria</span>
+            <Button variant="outline-green" size="sm" disabled={tournament.status === "Inscripciones abiertas"} onClick={confirmAllFormats}>Confirmar formatos</Button>
+          </div>
+          {tournament.status === "Inscripciones abiertas" ? (
+            <div className="info-band">
+              <strong>Inscripciones abiertas</strong>
+              <span>Cerra inscripciones para que GAME cuente participantes y proponga formatos por categoria.</span>
+              <Button variant="outline-green" size="sm" onClick={closeRegistrations}>Cerrar inscripciones</Button>
+            </div>
+          ) : null}
+          <div className="admin-table">
+            <div className="admin-table-row admin-table-row--formats admin-table-row--head">
+              <strong>Categoria</strong>
+              <span>Participantes</span>
+              <span>Formato</span>
+            </div>
+            {stages.map((stage) => {
+              const participantCount = registrations.filter((registration) => registration.categoryId === stage.categoryId && registration.status !== "Rechazada").length || stage.inscriptionsCount || 0;
+              const selectedFormat = stage.format || stage.recommendedFormat || "";
+              const hasParticipants = participantCount > 0;
+              return (
+                <div key={stage.categoryId} className="admin-table-row admin-table-row--formats">
+                  <strong>{stage.categoryName}</strong>
+                  <span>{hasParticipants ? participantCount : "Sin inscriptos"}</span>
+                  <div className="format-select-cell">
+                    <select value={selectedFormat} disabled={tournament.status === "Inscripciones abiertas" || !hasParticipants} onChange={(event) => updateFormat(stage.categoryId, event.target.value)}>
+                      <option value="" disabled>Formato pendiente</option>
+                      {TOURNAMENT_FORMATS.map((format) => <option key={format} value={format}>{format}</option>)}
+                    </select>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="section-title">
+            <span>Programacion</span>
+            <Button size="sm" icon={RefreshCw} onClick={recalculateSchedule}>Recalcular programacion</Button>
+          </div>
+          <div className="wizard-actions">
+            <Button variant="secondary" icon={CalendarX} onClick={() => setConfirmSuspendDayOpen(true)}>Suspender resto de jornada</Button>
+            <Button variant="ghost" icon={CloudRain} onClick={() => setConfirmSuspendWeekendOpen(true)}>Suspender fin de semana</Button>
+          </div>
+        </div>
+      </Modal>
+      <Modal open={confirmSuspendDayOpen} title="Suspender jornada" onClose={() => setConfirmSuspendDayOpen(false)}>
+        <div className="match-result-modal">
+          <p className="muted">Estas seguro que queres suspender el resto de los partidos de hoy?</p>
+          <div className="wizard-actions">
+            <Button variant="ghost" onClick={() => setConfirmSuspendDayOpen(false)}>No</Button>
+            <Button variant="secondary" icon={CalendarX} onClick={suspendDay}>Si</Button>
+          </div>
+        </div>
+      </Modal>
+      <Modal open={confirmSuspendWeekendOpen} title="Suspender fin de semana" onClose={() => setConfirmSuspendWeekendOpen(false)}>
+        <div className="match-result-modal">
+          <p className="muted">Estas seguro que queres suspender todos los partidos del fin de semana?</p>
+          <div className="wizard-actions">
+            <Button variant="ghost" onClick={() => setConfirmSuspendWeekendOpen(false)}>No</Button>
+            <Button variant="secondary" icon={CloudRain} onClick={suspendWeekend}>Si</Button>
+          </div>
+        </div>
+      </Modal>
+      <Modal open={finishModalOpen} title={pendingMatchesCount ? "Todavia quedan partidos sin finalizar" : "Finalizar torneo"} onClose={() => setFinishModalOpen(false)}>
+        <div className="match-result-modal">
+          <p className="muted">
+            {pendingMatchesCount
+              ? `Quedan ${pendingMatchesCount} partidos pendientes. Seguro que queres finalizar el torneo igualmente?`
+              : "Esta accion cerrara definitivamente el torneo."}
+          </p>
+          <div className="wizard-actions">
+            <Button variant="ghost" onClick={() => setFinishModalOpen(false)}>Cancelar</Button>
+            <Button variant="danger" icon={Trophy} onClick={finalizeTournament}>Finalizar torneo</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
