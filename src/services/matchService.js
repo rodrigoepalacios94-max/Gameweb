@@ -1,9 +1,8 @@
 import { createMockId, mutateMockData, readMockData } from "../mocks/mockDatabase";
 import { DEFAULT_MATCH_FORMAT, formatResultSets, getSetsToWin, isDecidingSuperTiebreak, normalizeMatchFormat } from "../utils/matchFormat";
-import { buildDevTestBracketFromPreliminaries } from "../dev/tournamentTestFactory";
 import { auditService } from "./auditService";
 import { mockRequest } from "./serviceUtils";
-import { ensureTournamentCategoryStages } from "./tournamentCategoryService";
+import { buildPreliminaryBracketFromResults, ensureTournamentCategoryStages } from "./tournamentCategoryService";
 
 function getTournament(db, tournamentId) {
   return db.tournaments.find((tournament) => tournament.id === tournamentId) || null;
@@ -298,16 +297,15 @@ function calculatePreliminaryPerformance(result, winnerId, match) {
   };
 }
 
-function maybeBuildDevBracket(db, match) {
+function maybeBuildPreliminaryBracket(db, match) {
   const tournament = getTournament(db, match.tournamentId);
   const categoryStage = tournament ? ensureTournamentCategoryStages(db, tournament).find((stage) => stage.categoryId === match.categoryId) : null;
-  const bracket = db.brackets[categoryStage?.bracketKey] || db.brackets[match.tournamentId];
-  if (!tournament?.isDevTest || !bracket || bracket.rounds?.length) return;
+  if (!tournament || categoryStage?.format !== "Preliminar") return;
   const preliminaries = db.matches
-    .filter((item) => item.tournamentId === match.tournamentId && item.phase === "Preliminar")
+    .filter((item) => item.tournamentId === match.tournamentId && item.categoryId === match.categoryId && item.phase === "Preliminar")
     .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
   if (!preliminaries.length || preliminaries.some((item) => item.status !== "Finalizado" || !item.winnerId)) return;
-  db.brackets[match.tournamentId] = buildDevTestBracketFromPreliminaries(db, tournament, preliminaries);
+  buildPreliminaryBracketFromResults(db, tournament, match.categoryId);
   tournament.phases = ["Preliminar", "32avos", "16avos", "Octavos", "Cuartos", "Semifinal", "Final"];
 }
 
@@ -354,7 +352,7 @@ function applyFinalResult(db, id, payload, actor, action) {
     Object.assign(target, calculatePreliminaryPerformance(result, result.winnerId, target));
   }
   advanceBracketWinner(db, target);
-  maybeBuildDevBracket(db, target);
+    maybeBuildPreliminaryBracket(db, target);
   return { match: target, action, actor };
 }
 

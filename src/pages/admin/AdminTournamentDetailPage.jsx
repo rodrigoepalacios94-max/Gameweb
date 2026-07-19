@@ -84,12 +84,6 @@ export function AdminTournamentDetailPage() {
     reload();
   }
 
-  async function confirmFormat(categoryId, format) {
-    await tournamentService.confirmCategoryFormat(tournament.id, categoryId, format);
-    setTab("bracket");
-    reload();
-  }
-
   async function confirmAllFormats() {
     await tournamentService.confirmAllCategoryFormats(tournament.id);
     setTab("bracket");
@@ -134,7 +128,7 @@ export function AdminTournamentDetailPage() {
           <div className="hero-meta-row">
             <Badge tone={tournament.status === "En juego" ? "info" : tournament.status === "Inscripciones abiertas" ? "success" : "neutral"}>{tournament.status}</Badge>
             <span><CalendarDays size={16} /> {formatDate(tournament.startDate)}</span>
-            <span>{tournament.type}</span>
+            <span>{activeStage?.format || activeStage?.recommendedFormat || "Formato pendiente"}</span>
             <span>{formatCurrency(tournament.price)}</span>
             {tournament.isDevTest ? <Badge tone="warning">DEV TEST</Badge> : null}
           </div>
@@ -153,7 +147,6 @@ export function AdminTournamentDetailPage() {
             ))}
           </select>
           <span>{activeStage?.inscriptionsCount || 0} inscriptos</span>
-          <span>Cuadro independiente: {activeStage?.bracketKey}</span>
         </div>
       </Card>
 
@@ -167,8 +160,7 @@ export function AdminTournamentDetailPage() {
               <span>Inicio: {formatDate(tournament.startDate)}</span>
               <span>Semifinales previstas: {formatDate(tournament.semifinalsDate)}</span>
               <span>Dia de finales: {formatDate(tournament.finalsDate)}</span>
-              <span>Formato general historico: {tournament.type}</span>
-              <span>Formato categoria activa: {activeStage?.format}</span>
+              <span>Formato categoria activa: {activeStage?.format || activeStage?.recommendedFormat || "Pendiente"}</span>
               <span>Sistema de puntaje: {tournament.scoringSystem}</span>
               <span>Valor de inscripcion: {formatCurrency(tournament.price)}</span>
               <span>Categorias: {categories.map((category) => `${category.name} ${category.branch}`).join(", ")}</span>
@@ -211,39 +203,24 @@ export function AdminTournamentDetailPage() {
               <strong>Categoria</strong>
               <span>Participantes</span>
               <span>Formato sugerido</span>
-              <span>Formato</span>
-              <span>Estado</span>
-              <span>Accion</span>
             </div>
             {stages.map((stage) => {
               const participantCount = registrations.filter((registration) => registration.categoryId === stage.categoryId && registration.status !== "Rechazada").length || stage.inscriptionsCount || 0;
               const selectedFormat = stage.format || stage.recommendedFormat || "";
               const hasParticipants = participantCount > 0;
-              const isConfirmed = stage.formatStatus === "confirmed" || stage.status === "Cuadro generado";
-              const isSuggested = stage.formatDecision !== "manual" && selectedFormat && selectedFormat === stage.recommendedFormat;
               return (
                 <div key={stage.categoryId} className="admin-table-row admin-table-row--formats">
                   <strong>{stage.categoryName}</strong>
                   <span>{hasParticipants ? participantCount : "Sin inscriptos"}</span>
-                  <span>{stage.recommendedFormat || "Sin sugerencia"}</span>
                   <div className="format-select-cell">
                     <select value={selectedFormat} disabled={tournament.status === "Inscripciones abiertas" || !hasParticipants} onChange={(event) => updateFormat(stage.categoryId, event.target.value)}>
                       <option value="" disabled>Formato pendiente</option>
                       {TOURNAMENT_FORMATS.map((format) => <option key={format} value={format}>{format}</option>)}
                     </select>
-                    {isSuggested ? <small>Sugerido por GAME</small> : selectedFormat ? <small>Modificado manualmente</small> : null}
                   </div>
-                  <Badge tone={stage.status === "Cuadro generado" || isConfirmed ? "success" : stage.status === "Sin inscriptos" ? "neutral" : "info"}>{stage.status}</Badge>
-                   <Button size="sm" variant="secondary" disabled={tournament.status === "Inscripciones abiertas" || !hasParticipants || !selectedFormat || isConfirmed} onClick={() => confirmFormat(stage.categoryId, selectedFormat)}>
-                    {isConfirmed ? "Confirmado" : "Confirmar formato"}
-                  </Button>
                 </div>
               );
             })}
-          </div>
-          <div className="info-band">
-            <strong>Regla aplicada</strong>
-            <span>El formato se decide despues del cierre de inscripciones, GAME solo recomienda y el profesor confirma o cambia la eleccion antes de generar la estructura deportiva.</span>
           </div>
         </Card>
       ) : null}
@@ -328,10 +305,6 @@ export function AdminTournamentDetailPage() {
               </div>
             ))}
           </div>
-          <div className="info-band">
-            <strong>Regla aplicada</strong>
-            <span>Finales primero, luego semifinales, cuartos, octavos y preliminares. Si no hay capacidad real, la final puede desplazarse y queda informada.</span>
-          </div>
         </Card>
       ) : null}
 
@@ -365,7 +338,7 @@ export function AdminTournamentDetailPage() {
             <div className="dev-test-panel">
               <div>
                 <strong>Torneo Prueba</strong>
-                <span>{participants.length} bots inscriptos en {activeStage?.categoryName} / {matches.filter((match) => match.phase === "Preliminar").length} preliminares generadas.</span>
+                <span>{participants.length} bots inscriptos en {activeStage?.categoryName} / {(bracket?.preliminaries || []).filter((match) => match.matchId).length} preliminares generadas.</span>
               </div>
               <Button disabled={tournament.testSimulationStatus === "Simulado" || !matches.some((match) => match.phase === "Preliminar")} onClick={simulatePreliminaries}>
                 {tournament.testSimulationStatus === "Simulado" ? "Preliminares simuladas" : matches.some((match) => match.phase === "Preliminar") ? "Simular preliminares" : "Sin preliminares"}
@@ -394,19 +367,20 @@ export function AdminTournamentDetailPage() {
 
       {activeTab === "zones" ? (
         <Card>
-          <h2>Zonas</h2>
-          <div className="zone-grid">
-            <div className="zone-card">
-              <strong>Zona A</strong>
-              <span>Clasifican 2 jugadores</span>
-              <span>Desempate: PG, sets, games, ranking general.</span>
+          <h2>Zonas - {activeStage?.categoryName}</h2>
+          {bracket?.zones?.length ? (
+            <div className="zone-grid">
+              {bracket.zones.map((zone) => (
+                <div key={zone.id} className="zone-card">
+                  <strong>{zone.name}</strong>
+                  <span>Clasifican {zone.qualifiers} jugadores</span>
+                  {zone.players.map((player) => <span key={player}>{player}</span>)}
+                </div>
+              ))}
             </div>
-            <div className="zone-card">
-              <strong>Zona B</strong>
-              <span>Todos contra todos y luego cuadro final.</span>
-              <span>Partido desempate si persiste igualdad.</span>
-            </div>
-          </div>
+          ) : (
+            <EmptyState title="Sin zonas generadas" description="La categoria activa no usa formato Zonas o todavia no fue confirmado." />
+          )}
         </Card>
       ) : null}
 

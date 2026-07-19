@@ -370,7 +370,10 @@ Información general.
 Paso 2
 Seleccionar categorías.
 Paso 3
-Elegir formato.
+Configurar formato del partido:
+- Cantidad de sets.
+- Games por set.
+- Uso de Super Tie-Break.
 Paso 4
 Seleccionar sistema de puntaje.
 
@@ -378,6 +381,9 @@ Paso 5
 Definir canchas y horarios.
 Paso 6
 Publicar torneo.
+
+El formato competitivo de cada categoria no se selecciona durante la creacion inicial.
+Preliminar, Zonas y Eliminacion Directa se definen por categoria despues del cierre de inscripciones, cuando GAME conoce la cantidad real de jugadores inscriptos en cada categoria.
 
 6.5 Edición
 Mientras el torneo no haya comenzado podrán modificarse todos los datos.
@@ -1138,3 +1144,59 @@ Estados posibles por categoria:
 
 No debe generarse una llave, preliminar o zona definitiva para una categoria hasta que el formato de esa categoria este confirmado.
 Una categoria sin inscriptos no genera formato ni estructura deportiva.
+
+## REGLAS DE GENERACION POR FORMATO
+
+Cada categoria genera una estructura independiente segun su formato y su cantidad real de participantes.
+No debe reutilizarse una misma llave para Preliminar, Zonas y Eliminacion Directa.
+
+### Eliminacion Directa
+
+Eliminacion Directa no utiliza preliminares.
+Si la cantidad entra exactamente en un cuadro base, se genera directamente ese cuadro.
+
+Ejemplos:
+
+- 16 jugadores: 8 partidos de 16avos, 4 cuartos, 2 semifinales y 1 final.
+- 32 jugadores: 16 partidos de 16avos, 8 octavos, 4 cuartos, 2 semifinales y 1 final.
+
+Si sobran jugadores respecto del cuadro base inmediato, GAME genera una ronda previa para completar el cuadro sin crear byes masivos.
+Ejemplo con 34 jugadores:
+
+- 4 jugadores disputan 2 partidos de 32avos.
+- Los 2 ganadores completan un cuadro principal de 32.
+- Luego se generan 16avos, octavos, cuartos, semifinal y final.
+
+No se debe crear una llave de 64 con 30 byes para resolver 34 jugadores.
+
+### Preliminar
+
+Preliminar tiene una logica propia.
+Todos los jugadores disputan un partido preliminar cuando existe rival disponible.
+Con 34 jugadores se generan 17 partidos preliminares.
+
+Luego se ordenan ganadores y perdedores segun rendimiento preliminar.
+Para el caso oficial de 34 jugadores:
+
+- Clasifican los 17 ganadores.
+- Clasifican directamente los 13 mejores perdedores.
+- Los 4 peores perdedores disputan 2 partidos de 32avos.
+- Los 2 ganadores de 32avos completan el cuadro de 32.
+- En 16avos se generan 16 partidos.
+
+El ranking general solo se usa para cabezas de serie o desempates cuando corresponda.
+No debe reemplazar el orden deportivo obtenido en preliminares.
+
+### Zonas
+
+Zonas utiliza grupos pequenos y equilibrados.
+Las zonas deben tener normalmente 3 o 4 jugadores.
+No se deben generar dos zonas gigantes para cantidades altas o incomodas.
+
+Ejemplos:
+
+- 11 jugadores: distribucion equilibrada de 4, 4 y 3.
+- 23 jugadores: distribucion equilibrada en varias zonas de 3 y 4 jugadores.
+
+Dentro de cada zona todos juegan contra todos.
+La fase eliminatoria posterior se genera despues de conocer los clasificados de cada zona.

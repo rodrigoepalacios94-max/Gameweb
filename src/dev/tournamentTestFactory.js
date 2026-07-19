@@ -1,5 +1,6 @@
 import { createMockId, mutateMockData, readMockData } from "../mocks/mockDatabase";
 import { DEFAULT_MATCH_FORMAT } from "../utils/matchFormat";
+import { buildPreliminaryBracketFromResults } from "../services/tournamentCategoryService";
 
 const TEST_CATEGORY_ID = "cat-m4";
 const TEST_CATEGORY_NAME = "4a Masculino";
@@ -374,18 +375,7 @@ function simulateCategoryPreliminaries(db, tournament, categoryId) {
   });
 
   const stage = tournament.categoryStages?.find((item) => item.categoryId === categoryId);
-  const bracket = db.brackets[stage?.bracketKey] || db.brackets[`${tournament.id}::${categoryId}`];
-  if (bracket) {
-    bracket.preliminaries = prelimMatches.map((match) => ({
-      matchId: match.id,
-      playerA: match.playerA,
-      playerB: match.playerB,
-      status: match.status,
-      result: match.result,
-      winner: match.winnerId === match.playerAId ? match.playerA : match.playerB,
-    }));
-    db.brackets[`${tournament.id}::${categoryId}`] = bracket;
-  }
+  const bracket = buildPreliminaryBracketFromResults(db, tournament, categoryId) || db.brackets[stage?.bracketKey] || db.brackets[`${tournament.id}::${categoryId}`];
   if (stage) stage.status = "Preliminares simuladas";
   tournament.testSimulationStatus = "Simulado";
   return { tournament, bracket, simulatedPreliminaries: prelimMatches.length };
@@ -397,35 +387,13 @@ export function simulatePreliminaryResults(tournamentId, categoryId = null) {
     if (!tournament?.isDevTest) return null;
     if (categoryId) return simulateCategoryPreliminaries(db, tournament, categoryId);
 
-    const prelimMatches = db.matches
+    const categoryIds = [...new Set(db.matches
       .filter((match) => match.tournamentId === tournamentId && match.phase === "Preliminar")
-      .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-
-    prelimMatches.forEach((match, index) => {
-      const winnerIsA = index < 16;
-      const score = scoreFor(index);
-      Object.assign(match, {
-        status: "Finalizado",
-        result: score.result,
-        resultDetail: makeResultDetail(
-          score,
-          winnerIsA ? match.playerAId : match.playerBId,
-          winnerIsA ? match.playerBId : match.playerAId,
-        ),
-        sets: score.sets,
-        winnerId: winnerIsA ? match.playerAId : match.playerBId,
-        loserId: winnerIsA ? match.playerBId : match.playerAId,
-        preliminaryScore: score.score - index,
-        loserPreliminaryScore: score.score - 28 - index,
-      });
-    });
-
-    const bracket = buildDevTestBracketFromPreliminaries(db, tournament, prelimMatches);
-    db.brackets[tournamentId] = bracket;
-    db.brackets[`${tournamentId}::${TEST_CATEGORY_ID}`] = bracket;
+      .map((match) => match.categoryId))];
+    const results = categoryIds.map((itemCategoryId) => simulateCategoryPreliminaries(db, tournament, itemCategoryId));
     tournament.testSimulationStatus = "Simulado";
     tournament.phases = ["Preliminar", "32avos", "16avos", "Octavos", "Cuartos", "Semifinal", "Final"];
-    return { tournament, bracket };
+    return { tournament, results };
   });
 }
 

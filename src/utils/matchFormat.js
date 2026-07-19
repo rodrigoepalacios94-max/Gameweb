@@ -8,7 +8,9 @@ export const DEFAULT_MATCH_FORMAT = {
 export const MATCH_FORMAT_OPTIONS = {
   bestOfSets: [
     { value: 1, label: "Al mejor de 1 set" },
+    { value: 2, label: "Al mejor de 2 sets" },
     { value: 3, label: "Al mejor de 3 sets" },
+    { value: 4, label: "Al mejor de 4 sets" },
     { value: 5, label: "Al mejor de 5 sets" },
   ],
   gamesPerSet: [

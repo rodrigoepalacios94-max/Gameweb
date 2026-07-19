@@ -26,7 +26,8 @@ export function PlayerTournamentDetailPage() {
     const stages = tournament ? await tournamentService.getTournamentCategoryStages(id) : [];
     const playerStages = stages.filter((stage) => (stage.participants || []).includes(user.id));
     const visibleStages = playerStages.length ? playerStages : stages;
-    const activeCategoryId = selectedCategoryId || tournament?.playerCategoryId || visibleStages[0]?.categoryId || null;
+    const selectedIsVisible = visibleStages.some((stage) => stage.categoryId === selectedCategoryId);
+    const activeCategoryId = selectedIsVisible ? selectedCategoryId : visibleStages[0]?.categoryId || tournament?.playerCategoryId || null;
     const [matches, bracket, categories, participants] = await Promise.all([
       matchService.getMatchesByTournament(id, activeCategoryId),
       tournamentService.getTournamentBracket(id, activeCategoryId),
@@ -66,7 +67,7 @@ export function PlayerTournamentDetailPage() {
             <Badge tone={tournament.status === "Inscripciones abiertas" ? "success" : tournament.status === "En juego" ? "info" : "neutral"}>{tournament.status}</Badge>
             <span>{formatDate(tournament.startDate)}</span>
             <span>{activeStage?.categoryName}</span>
-            <span>{activeStage?.format || tournament.type}</span>
+            <span>{activeStage?.format || activeStage?.recommendedFormat || "Formato pendiente"}</span>
             <span>{formatCurrency(tournament.price)}</span>
           </div>
         </div>
@@ -75,7 +76,7 @@ export function PlayerTournamentDetailPage() {
       <Card className="category-nav-card">
         <div className="section-title">
           <span>Categoria seleccionada</span>
-          <Badge tone="info">{activeStage?.format || tournament.type}</Badge>
+          <Badge tone="info">{activeStage?.format || activeStage?.recommendedFormat || "Formato pendiente"}</Badge>
         </div>
         <div className="category-selector-row">
           <select value={activeCategoryId || ""} onChange={(event) => setSelectedCategoryId(event.target.value)}>
@@ -97,7 +98,7 @@ export function PlayerTournamentDetailPage() {
               <span><CalendarDays size={17} /> Inicio: {formatDate(tournament.startDate)}</span>
               <span>Semifinales previstas: {formatDate(tournament.semifinalsDate)}</span>
               <span>Dia de finales: {formatDate(tournament.finalsDate)}</span>
-              <span><Trophy size={17} /> Formato categoria: {activeStage?.format || tournament.type}</span>
+              <span><Trophy size={17} /> Formato categoria: {activeStage?.format || activeStage?.recommendedFormat || "Pendiente"}</span>
               <span><CreditCard size={17} /> Precio: {formatCurrency(tournament.price)}</span>
             </div>
           </Card>
@@ -194,7 +195,6 @@ export function PlayerTournamentDetailPage() {
               </div>
             ))}
           </div>
-          <p className="muted">Los criterios de desempate definitivos quedan para la etapa de algoritmo/backend.</p>
         </Card>
       ) : null}
     </div>

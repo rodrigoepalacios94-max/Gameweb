@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CalendarDays, CheckCircle2, Clock, GitBranch, Send, Trash2, Trophy, UsersRound, X } from "lucide-react";
+import { CalendarDays, CheckCircle2, Clock, Send, Trash2, Trophy, UsersRound, X } from "lucide-react";
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
@@ -8,7 +8,6 @@ import { ErrorState } from "../../components/common/ErrorState";
 import { LoadingState } from "../../components/common/LoadingState";
 import { Tabs } from "../../components/common/Tabs";
 import { useAsyncData } from "../../hooks/useAsyncData";
-import { adminService } from "../../services/adminService";
 import { categoryService } from "../../services/categoryService";
 import { tournamentService } from "../../services/tournamentService";
 import { formatDate } from "../../utils/formatters";
@@ -17,16 +16,10 @@ import { DEFAULT_MATCH_FORMAT, describeMatchFormat } from "../../utils/matchForm
 const steps = [
   { id: "general", label: "General" },
   { id: "categories", label: "Categorias" },
-  { id: "format", label: "Formato" },
+  { id: "match", label: "Partido" },
   { id: "schedule", label: "Horarios" },
   { id: "publish", label: "Publicar" },
 ];
-
-const formatDescriptions = {
-  Preliminar: "Todos juegan preliminar antes del cuadro.",
-  Zonas: "Grupos todos contra todos y cierre eliminatorio.",
-  "Eliminacion Directa": "Cuadro directo desde el inicio.",
-};
 
 const initialForm = {
   name: "",
@@ -38,7 +31,7 @@ const initialForm = {
   finalsDate: "2026-08-16",
   price: 18000,
   scoringSystem: "GAME 1000",
-  type: "Preliminar",
+  type: "Formato pendiente",
   matchFormat: DEFAULT_MATCH_FORMAT,
 };
 
@@ -60,11 +53,8 @@ export function AdminTournamentCreatePage() {
   const [formError, setFormError] = useState("");
   const [publishing, setPublishing] = useState(false);
   const { data, loading, error, reload } = useAsyncData(async () => {
-    const [settings, categories] = await Promise.all([
-      adminService.getSettings(),
-      categoryService.getCategories(),
-    ]);
-    return { settings, categories };
+    const categories = await categoryService.getCategories();
+    return { categories };
   }, []);
 
   const isDirty = useMemo(() => {
@@ -80,7 +70,7 @@ export function AdminTournamentCreatePage() {
   if (loading) return <LoadingState message="Cargando asistente..." />;
   if (error) return <ErrorState title="No pudimos cargar el asistente." onRetry={reload} />;
 
-  const { settings, categories } = data;
+  const { categories } = data;
   const activeCategories = categories.filter((category) => category.status === "Activa");
   const activeCategoryIds = activeCategories.map((category) => category.id);
   const saturdayError = hasDuplicatedTimes(schedule.saturday);
@@ -160,6 +150,18 @@ export function AdminTournamentCreatePage() {
       setActiveStep("schedule");
       return;
     }
+    const bestOfSets = Number(form.matchFormat.bestOfSets);
+    const gamesPerSet = Number(form.matchFormat.gamesPerSet);
+    if (!Number.isInteger(bestOfSets) || bestOfSets < 1 || bestOfSets > 5) {
+      setFormError("La cantidad de sets debe ser un numero entero entre 1 y 5.");
+      setActiveStep("match");
+      return;
+    }
+    if (!Number.isInteger(gamesPerSet) || gamesPerSet < 1) {
+      setFormError("Los games por set deben ser un numero entero mayor a 0.");
+      setActiveStep("match");
+      return;
+    }
     const saturday = sortTimes(schedule.saturday);
     const sunday = sortTimes(schedule.sunday);
     if (!saturday.length && !sunday.length) {
@@ -194,7 +196,7 @@ export function AdminTournamentCreatePage() {
       schedule: { saturday, sunday },
       courtCapacity: { saturday: 3, sunday: 4 },
       courts: ["Cancha 1", "Cancha 2", "Cancha 3", "Cancha 4"],
-      phases: form.type === "Preliminar" ? ["Preliminar", "Cuadro principal"] : [form.type],
+      phases: ["Formato pendiente"],
       participants: [],
       registrationStatus: "No inscripto",
       playerTournamentStatus: "Disponible",
@@ -239,29 +241,19 @@ export function AdminTournamentCreatePage() {
                 <Button variant="ghost" size="sm" onClick={clearAllCategories}>Deseleccionar todas</Button>
               </div>
             </div>
-            <div className="badge-cloud badge-cloud--wide">
+            <div className="category-pick-list">
               {activeCategories.map((category) => (
-                <label key={category.id} className={selectedCategories.includes(category.id) ? "check-pill is-selected" : "check-pill"}>
-                  <input type="checkbox" checked={selectedCategories.includes(category.id)} onChange={() => toggleCategory(category.id)} />
+                <button key={category.id} className={selectedCategories.includes(category.id) ? "category-pick-row is-selected" : "category-pick-row"} type="button" onClick={() => toggleCategory(category.id)}>
                   <strong>{category.name} {category.branch}</strong>
                   <span>Nivel {category.level} / {category.status}</span>
-                </label>
+                </button>
               ))}
             </div>
           </div>
         ) : null}
 
-        {activeStep === "format" ? (
+        {activeStep === "match" ? (
           <div className="page-stack compact">
-            <div className="option-grid">
-              {settings.tournamentTypes.map((format) => (
-                <button key={format} className={form.type === format ? "category-option is-selected" : "category-option"} type="button" onClick={() => updateField("type", format)}>
-                  <GitBranch size={20} />
-                  <strong>{format}</strong>
-                  <span>{formatDescriptions[format]}</span>
-                </button>
-              ))}
-            </div>
             <section className="match-format-panel">
               <div className="section-title">
                 <span>Formato de partido</span>
@@ -269,7 +261,7 @@ export function AdminTournamentCreatePage() {
               </div>
               <div className="form-grid">
                 <label>Cantidad de sets
-                  <input type="number" min="1" step="2" value={form.matchFormat.bestOfSets || ""} onChange={(event) => updateMatchFormat("bestOfSets", event.target.value === "" ? "" : Number(event.target.value))} />
+                  <input type="number" min="1" max="5" step="1" value={form.matchFormat.bestOfSets || ""} onChange={(event) => updateMatchFormat("bestOfSets", event.target.value === "" ? "" : Number(event.target.value))} />
                 </label>
                 <label>Games por set
                   <input type="number" min="1" value={form.matchFormat.gamesPerSet || ""} onChange={(event) => updateMatchFormat("gamesPerSet", event.target.value === "" ? "" : Number(event.target.value))} />
@@ -318,9 +310,6 @@ export function AdminTournamentCreatePage() {
               <span>Cierre previsto: {formatDate(form.registrationCloseDate)}</span>
               <span>Semifinal: {formatDate(form.semifinalsDate)}</span>
               <span>Dia de finales: {formatDate(form.finalsDate)}</span>
-            </SummarySection>
-            <SummarySection title="Formato" icon={GitBranch}>
-              <span>{form.type}</span>
             </SummarySection>
             <SummarySection title="Formato de partido" icon={Trophy}>
               <span>Sets: {describeMatchFormat(form.matchFormat).sets}</span>
