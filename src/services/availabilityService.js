@@ -14,6 +14,34 @@ function getAvailabilityRecord(db, matchId, playerId) {
   return ensureAvailabilityStore(db).find((item) => item.matchId === matchId && item.playerId === playerId) || null;
 }
 
+function addDays(dateString, days) {
+  const date = new Date(`${dateString}T12:00:00`);
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function getTournamentSlots(db, tournamentId) {
+  const tournament = db.tournaments.find((item) => item.id === tournamentId);
+  const schedule = tournament?.schedule || {};
+  const startDate = tournament?.startDate || "";
+  const days = [
+    { key: "saturday", label: "Sabado", date: startDate, times: schedule.saturday || [] },
+    { key: "sunday", label: "Domingo", date: startDate ? addDays(startDate, 1) : "", times: schedule.sunday || [] },
+  ];
+
+  return days
+    .map((day) => ({
+      ...day,
+      slots: day.times.filter(Boolean).map((time) => ({
+        id: `${day.date}|${time}`,
+        value: `${day.date} ${time}`,
+        date: day.date,
+        time,
+      })),
+    }))
+    .filter((day) => day.slots.length);
+}
+
 function hasPendingRival(match, playerId) {
   if (!match) return false;
   if (match.playerAId === playerId) return !match.playerBId || match.playerB === "A definir";
@@ -32,6 +60,7 @@ function decorateMatchForPlayer(db, match, playerId) {
     opponent: opponentName || "A definir",
     opponentAvatar,
     attendance: playerAvailability || null,
+    availableSlotsByDay: getTournamentSlots(db, match.tournamentId),
     needsAttendanceConfirmation: ["Pendiente", "Pendiente de asistencia", "Reprogramado"].includes(match.status) && !playerAvailability,
     pendingRival: hasPendingRival(match, playerId),
   };

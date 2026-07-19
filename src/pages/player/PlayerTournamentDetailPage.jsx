@@ -10,6 +10,7 @@ import { LoadingState } from "../../components/common/LoadingState";
 import { Tabs } from "../../components/common/Tabs";
 import { PreliminaryMatches } from "../../components/brackets/PreliminaryMatches";
 import { TournamentBracket } from "../../components/brackets/TournamentBracket";
+import { useAuth } from "../../context/AuthContext";
 import { useAsyncData } from "../../hooks/useAsyncData";
 import { matchService } from "../../services/matchService";
 import { tournamentService } from "../../services/tournamentService";
@@ -17,20 +18,23 @@ import { formatCurrency, formatDate } from "../../utils/formatters";
 
 export function PlayerTournamentDetailPage() {
   const { id } = useParams();
+  const { user } = useAuth();
   const [tab, setTab] = useState("bracket");
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const { data, loading, error, reload } = useAsyncData(async () => {
     const tournament = await tournamentService.getTournamentById(id);
     const stages = tournament ? await tournamentService.getTournamentCategoryStages(id) : [];
-    const activeCategoryId = selectedCategoryId || tournament?.playerCategoryId || stages[0]?.categoryId || null;
+    const playerStages = stages.filter((stage) => (stage.participants || []).includes(user.id));
+    const visibleStages = playerStages.length ? playerStages : stages;
+    const activeCategoryId = selectedCategoryId || tournament?.playerCategoryId || visibleStages[0]?.categoryId || null;
     const [matches, bracket, categories, participants] = await Promise.all([
       matchService.getMatchesByTournament(id, activeCategoryId),
       tournamentService.getTournamentBracket(id, activeCategoryId),
       tournamentService.getTournamentCategories(id),
       tournamentService.getTournamentParticipants(id, activeCategoryId),
     ]);
-    return { tournament, stages, activeCategoryId, matches, bracket, categories, participants };
-  }, [id, selectedCategoryId]);
+    return { tournament, stages: visibleStages, activeCategoryId, matches, bracket, categories, participants };
+  }, [id, selectedCategoryId, user.id]);
 
   if (loading) return <LoadingState message="Cargando torneo..." />;
   if (error) return <ErrorState title="No pudimos cargar el torneo." onRetry={reload} />;
@@ -49,6 +53,8 @@ export function PlayerTournamentDetailPage() {
     ...(bracket?.zones?.length ? [{ id: "standings", label: "Zonas" }] : []),
   ];
   const activeStage = stages.find((stage) => stage.categoryId === activeCategoryId) || stages[0];
+  const visibleCategoryIds = new Set(stages.map((stage) => stage.categoryId));
+  const visibleCategories = categories.filter((category) => visibleCategoryIds.has(category.id));
   return (
     <div className="page-stack">
       <header className="detail-hero tournament-detail-hero">
@@ -98,7 +104,7 @@ export function PlayerTournamentDetailPage() {
           <Card>
             <h2>Categorias</h2>
             <div className="badge-cloud">
-              {categories.map((category) => (
+              {visibleCategories.map((category) => (
                 <Badge key={category.id} tone="info">{category.name} {category.branch}</Badge>
               ))}
             </div>

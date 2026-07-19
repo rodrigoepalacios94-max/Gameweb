@@ -143,10 +143,11 @@ El sistema deberá detectar cuando ambas categorías se disputen el mismo día y
 
 3.7 Disponibilidad
 La disponibilidad no se solicita durante la inscripción al torneo.
-Cada nuevo partido genera una solicitud de confirmación de asistencia.
-El jugador confirma que jugará ese partido e informa los días y horarios en los que NO puede jugar.
-La disponibilidad pertenece exclusivamente a ese partido o ronda futura.
+Cada partido futuro o pendiente genera su propia solicitud de confirmación de asistencia.
+El jugador confirma que disputará ese partido e informa solamente los horarios en los que NO puede jugar.
 Todos los horarios no marcados se consideran potencialmente disponibles.
+La disponibilidad pertenece exclusivamente a ese partido específico.
+Cada nuevo partido requiere una nueva confirmación.
 
 3.8 Estado del jugador
 Un jugador podrá encontrarse en alguno de los siguientes estados:
@@ -432,9 +433,11 @@ Confirma inscripción.
 Recibe comprobante.
 
 7.3 Disponibilidad
-La inscripción no incluye disponibilidad horaria.
-La disponibilidad se solicita antes de cada partido, cuando el sistema ya conoce que el jugador tiene una próxima ronda o partido pendiente.
-El jugador indica solamente los horarios donde NO puede jugar para ese partido específico.
+La disponibilidad no se carga durante la inscripción.
+Cuando GAME conoce que un jugador tiene un próximo partido, el sistema solicita confirmar asistencia para ese partido.
+El jugador marca únicamente los horarios en los que NO puede jugar, usando los horarios configurados por el profesor para el torneo.
+Todos los horarios no marcados se consideran disponibles.
+La disponibilidad se guarda por partido y no como disponibilidad global del jugador.
 
 7.4 Doble categoría
 Si un jugador se inscribe en dos categorías, el sistema advertirá posibles conflictos. Posteriormente el cronograma intentará evitar superposiciones.
@@ -1073,36 +1076,38 @@ Después de procesar los ascensos:
 
 Así queda definido algo importante: **el ranking no se borra históricamente**, sino que se cierra el ranking de 2026, por ejemplo, y el **ranking activo 2027 arranca vacío**. Eso después nos permite tener historial de campeones y posiciones anuales sin mezclar los puntos entre temporadas.
 
+## CELEBRACIÓN DE ASCENSO DE CATEGORÍA
 
-## TORNEOS POR CATEGORIA Y PROGRAMACION DINAMICA
+Cuando un jugador ascienda de categoría como consecuencia del cierre anual del Ranking Global, el sistema deberá registrar que existe un ascenso pendiente de comunicar.
 
-### Torneo dividido por categorias
+La primera vez que el jugador ingrese a GAME durante el nuevo año deportivo, deberá mostrarse una pantalla especial de celebración antes de acceder normalmente a su panel.
 
-Un torneo puede incluir multiples categorias, pero cada categoria funciona internamente como una competencia independiente.
+La pantalla deberá comunicar claramente:
 
-Cada categoria participante debe tener:
+- Que el jugador ascendió de categoría.
+- Su categoría anterior.
+- Su nueva categoría vigente.
 
-- Sus propios participantes.
-- Su propio formato deportivo.
-- Sus propios partidos.
-- Sus propias preliminares si corresponde.
-- Sus propias zonas si corresponde.
-- Su propia llave.
-- Su propia clasificacion.
-- Su propia final.
+Ejemplo:
 
-No debe existir una unica llave mezclando jugadores de diferentes categorias.
+¡FELICITACIONES!
 
-Las categorias comparten el torneo, fechas generales, dia de finales, infraestructura, canchas y horarios disponibles.
-No comparten cuadro, participantes, partidos ni formato deportivo interno.
+ASCENDISTE DE CATEGORÍA
 
-### Seleccion de categorias y formatos
+Ahora sos Categoría 2
 
-Al crear un torneo, el profesor selecciona las categorias participantes. Debe poder seleccionar categorias individualmente, seleccionar todas y deseleccionar todas.
+La experiencia podrá incluir una animación visual especial acorde con la identidad de GAME.
 
-Las categorias seleccionadas son las unicas habilitadas para recibir inscripciones.
+El mensaje deberá mostrarse una sola vez.
 
-El formato deportivo se decide por categoria, no necesariamente para todo el torneo.
+Una vez que el jugador confirme o cierre la celebración, el sistema deberá registrar que la notificación de ascenso ya fue visualizada y no deberá volver a mostrarse en futuros inicios de sesión.
+
+El ascenso ya debe haber sido aplicado previamente a la categoría vigente del jugador. La pantalla tiene una función exclusivamente informativa y de celebración, y no requiere aceptación por parte del jugador.
+
+## FORMATOS POR CATEGORIA DESPUES DEL CIERRE DE INSCRIPCIONES
+
+El formato deportivo definitivo se define por categoria y no como una unica regla global del torneo.
+
 El flujo correcto es:
 
 1. Crear torneo.
@@ -1110,202 +1115,26 @@ El flujo correcto es:
 3. Abrir inscripciones.
 4. Recibir inscripciones.
 5. Cerrar inscripciones.
-6. Mostrar cantidad de jugadores por categoria.
-7. Seleccionar formato por categoria.
+6. Contar participantes reales por categoria.
+7. GAME propone un formato por categoria.
+8. El profesor confirma o cambia manualmente cada formato.
+9. Recien despues de confirmar el formato se genera la estructura deportiva de esa categoria.
 
-Los formatos disponibles por categoria son:
+GAME puede sugerir:
 
-- Preliminar.
-- Zonas.
-- Eliminacion Directa.
+- Eliminacion Directa para cantidades que encajan bien en una llave limpia o requieren pocos byes.
+- Zonas para cantidades que no encajan comodamente en una llave y conviene distribuir en grupos.
+- Preliminar para categorias numerosas donde el esquema preliminar de GAME resulta conveniente.
 
-Si una categoria usa Preliminar, solo participan los jugadores de esa categoria en sus preliminares, ranking preliminar y llave.
-Si usa Zonas, el profesor configura posteriormente cantidad de zonas, distribucion y clasificados.
-Si usa Eliminacion Directa, se genera solo la llave de esa categoria respetando cabezas de serie.
+La sugerencia no es obligatoria.
+El profesor siempre conserva la decision final y puede cambiar cualquier formato sugerido antes de confirmarlo.
 
-### Detalle de torneo por categoria
+Estados posibles por categoria:
 
-El detalle del torneo debe tener un selector claro de categoria.
+- Formato pendiente.
+- Formato sugerido.
+- Formato confirmado.
+- Sin inscriptos.
 
-Al seleccionar una categoria, se muestran datos especificos de esa categoria:
-
-- Cuadro.
-- Partidos.
-- Participantes.
-- Resumen.
-- Disciplina.
-- Programacion.
-
-La seccion principal debe ser Cuadro cuando exista.
-Cada categoria conserva su propio estado y su propia llave.
-
-### Confirmacion de asistencia por partido
-
-La disponibilidad del jugador no es global y no se informa durante la inscripcion.
-
-Cuando GAME determina que un jugador tiene un proximo partido, debe solicitar:
-
-CONFIRMAR ASISTENCIA
-
-El jugador debe:
-
-1. Confirmar que disputara el partido.
-2. Informar dias y horarios en los que NO puede jugar.
-
-Todos los horarios no marcados se consideran potencialmente disponibles.
-
-La disponibilidad pertenece al partido/ronda futura especifica.
-Cada nuevo partido requiere una nueva confirmacion.
-
-### Rival pendiente
-
-Si un jugador ya clasifico a una siguiente ronda pero el rival todavia no esta definido, puede confirmar asistencia igualmente.
-
-La interfaz debe mostrar:
-
-- Ronda correspondiente.
-- Rival: A definir.
-
-Cuando se define el segundo jugador, se conserva la disponibilidad ya enviada por el primero y se solicita asistencia al nuevo rival.
-Cuando ambos jugadores confirmaron asistencia, GAME puede buscar un horario compatible.
-
-### Generacion del proximo partido
-
-Cuando el profesor finaliza un partido:
-
-- Si el ganador ya tiene rival definido, se habilita el siguiente partido y ambos jugadores reciben solicitud de asistencia.
-- Si el rival todavia no esta definido, se habilita el partido futuro con rival A definir para que el ganador pueda informar disponibilidad.
-- Cuando el rival se define, el partido se completa y se solicita disponibilidad al nuevo jugador.
-
-La disponibilidad solo decide fecha, horario y cancha.
-Nunca modifica rival, ronda ni estructura de la llave.
-
-### Programacion automatica
-
-GAME debe intentar ubicar los partidos pendientes dentro del calendario disponible considerando:
-
-- Confirmacion de asistencia.
-- Disponibilidad de ambos jugadores.
-- Horario.
-- Cancha disponible.
-- Ronda.
-- Categoria.
-- Descanso necesario.
-- Participacion en multiples categorias.
-- Fechas objetivo.
-- Semifinales.
-- Finales.
-
-Si un partido no puede jugarse un fin de semana, se intenta programar en el siguiente.
-
-### Canchas compartidas y distribucion proporcional
-
-Las canchas son recursos compartidos entre categorias.
-No se asigna una cancha fija a una categoria.
-
-La distribucion debe ser dinamica y proporcional segun partidos pendientes.
-
-Formula conceptual:
-
-pesoCategoria = partidosPendientesCategoria / totalPartidosPendientes
-
-Ese peso define aproximadamente que porcentaje de turnos disponibles recibe cada categoria.
-
-Distribuir parejo significa permitir que cada categoria avance proporcionalmente segun su volumen, no dar la misma cantidad de partidos a todas.
-
-Tambien debe considerarse el atraso:
-
-- Carga pendiente.
-- Porcentaje de avance.
-- Ronda actual.
-- Cercania de semifinal.
-- Cercania de final.
-
-Una categoria pequena no debe quedar detenida solo porque otra tenga mas participantes.
-
-### Prioridad de rondas finales
-
-La prioridad temporal es:
-
-1. Final.
-2. Semifinal.
-3. Cuartos.
-4. Octavos.
-5. Rondas iniciales.
-6. Preliminares.
-
-Si hay que retrasar partidos, se retrasan primero las rondas iniciales.
-Debe evitarse una separacion excesiva entre semifinal y final.
-
-El profesor puede definir fecha objetivo de semifinal y dia de finales.
-GAME debe intentar respetarlas.
-Si por lluvia, suspensiones, retrasos acumulados o falta real de capacidad es imposible llegar al dia de finales original, la final puede desplazarse y el profesor debe ser informado.
-
-### Suspension y reprogramacion
-
-El profesor puede suspender:
-
-- Un partido individual.
-- Una jornada completa.
-- Un fin de semana completo.
-- Los partidos restantes de un dia desde una hora determinada.
-
-Al suspender un partido:
-
-- Se solicita motivo.
-- El partido pasa a Suspendido.
-- Se retira del horario actual.
-- GAME intenta reprogramarlo para el siguiente fin de semana disponible.
-- El turno liberado puede ser ocupado por otro partido elegible.
-
-Al suspender una jornada o fin de semana:
-
-- No se mueven partidos ya finalizados.
-- Los partidos pendientes se recalculan.
-- La reprogramacion no es un cambio ciego de fecha; vuelve a considerar disponibilidad, categorias, peso proporcional, rondas, fechas objetivo, canchas y horarios.
-
-### Capacidad de canchas
-
-Para esta version mock:
-
-- Sabado: 3 canchas.
-- Domingo: 4 canchas.
-
-Las canchas son compartidas y pueden cambiar de categoria en cada turno.
-
-### Vista administrativa de programacion
-
-La vista administrativa debe permitir ver programacion por:
-
-- Fin de semana.
-- Sabado y domingo.
-- Turno.
-- Cancha.
-
-Cada tarjeta de partido debe mostrar:
-
-- Categoria.
-- Ronda.
-- Jugadores.
-- Estado.
-
-Debe incluir una seccion de distribucion por categoria, por ejemplo:
-
-- 1a Masculino: 12 de 38 partidos pendientes programados.
-- 2a Masculino: 6 de 20.
-- 3a Femenino: 3 de 10.
-
-No es necesario mostrar formulas internas en la interfaz.
-
-### Recalculo
-
-La accion Recalcular programacion vuelve a ejecutar la logica mock considerando:
-
-- Nuevas disponibilidades.
-- Suspensiones.
-- Partidos finalizados.
-- Categorias.
-- Carga proporcional.
-- Prioridad de rondas.
-
-No modifica resultados ya cargados.
+No debe generarse una llave, preliminar o zona definitiva para una categoria hasta que el formato de esa categoria este confirmado.
+Una categoria sin inscriptos no genera formato ni estructura deportiva.

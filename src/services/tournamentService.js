@@ -53,7 +53,7 @@ export const tournamentService = {
   },
   async createTournament(payload, actor = "admin-1") {
     return mockRequest(async () => {
-      const shouldUseDevFactory = isTestTournamentName(payload.name) && payload.type === "Preliminar";
+      const shouldUseDevFactory = isTestTournamentName(payload.name);
       const tournament = shouldUseDevFactory
         ? create34PlayerTestTournament(payload)
         : mutateMockData((db) => {
@@ -104,6 +104,12 @@ export const tournamentService = {
   async updateCategoryFormat(id, categoryId, format) {
     return tournamentCategoryService.updateCategoryFormat(id, categoryId, format);
   },
+  async confirmCategoryFormat(id, categoryId, format) {
+    return tournamentCategoryService.confirmCategoryFormat(id, categoryId, format);
+  },
+  async confirmAllCategoryFormats(id) {
+    return tournamentCategoryService.confirmAllCategoryFormats(id);
+  },
   async generateCategoryBracket(id, categoryId) {
     return tournamentCategoryService.generateCategoryBracket(id, categoryId);
   },
@@ -113,9 +119,9 @@ export const tournamentService = {
   async cancelTournament(id, actor = "admin-1") {
     return this.updateTournament(id, { status: "Cancelado" }, actor);
   },
-  async simulateTestPreliminaries(id, actor = "admin-1") {
+  async simulateTestPreliminaries(id, categoryId = null, actor = "admin-1") {
     return mockRequest(async () => {
-      const result = simulatePreliminaryResults(id);
+      const result = simulatePreliminaryResults(id, categoryId);
       await auditService.record({
         action: "simulate_dev_preliminaries",
         entityType: "tournament",

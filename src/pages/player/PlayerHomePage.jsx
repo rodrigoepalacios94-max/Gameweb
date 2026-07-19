@@ -18,6 +18,7 @@ import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
 import { ErrorState } from "../../components/common/ErrorState";
 import { LoadingState } from "../../components/common/LoadingState";
+import { Modal } from "../../components/common/Modal";
 import { StatCard } from "../../components/common/StatCard";
 import { useAuth } from "../../context/AuthContext";
 import { useAsyncData } from "../../hooks/useAsyncData";
@@ -30,7 +31,7 @@ import { formatCurrency, formatDate } from "../../utils/formatters";
 export function PlayerHomePage() {
   const { user } = useAuth();
   const [selectedUnavailableSlots, setSelectedUnavailableSlots] = useState([]);
-  const attendanceSlots = ["2026-08-08 10:00", "2026-08-08 12:00", "2026-08-08 14:00", "2026-08-09 09:00", "2026-08-09 11:00", "2026-08-09 13:00"];
+  const [attendanceModalOpen, setAttendanceModalOpen] = useState(false);
   const { data, loading, error, reload } = useAsyncData(async () => {
     const [matches, tournaments, notifications, attendanceRequests] = await Promise.all([
       matchService.getPlayerMatches(user.id),
@@ -44,11 +45,12 @@ export function PlayerHomePage() {
   if (loading) return <LoadingState message="Cargando tu dashboard..." />;
   if (error) return <ErrorState title="No pudimos cargar el inicio del jugador." onRetry={reload} />;
 
-  const nextMatch = data.matches.find((match) => match.status !== "Finalizado");
+  const scheduledNextMatch = data.matches.find((match) => match.status !== "Finalizado");
   const featuredTournament = data.tournaments.find((tournament) => tournament.status === "Inscripciones abiertas");
   const latestResults = data.matches.filter((match) => match.status === "Finalizado");
   const importantNotifications = data.notifications.filter((notification) => !notification.read).slice(0, 3);
   const attendanceRequest = data.attendanceRequests.find((match) => match.needsAttendanceConfirmation) || data.attendanceRequests[0];
+  const nextMatch = attendanceRequest || scheduledNextMatch;
 
   function toggleUnavailableSlot(slot) {
     setSelectedUnavailableSlots((current) => (current.includes(slot) ? current.filter((item) => item !== slot) : [...current, slot]));
@@ -58,8 +60,20 @@ export function PlayerHomePage() {
     if (!attendanceRequest) return;
     await availabilityService.confirmAttendance(attendanceRequest.id, user.id, selectedUnavailableSlots);
     setSelectedUnavailableSlots([]);
+    setAttendanceModalOpen(false);
     reload();
   }
+
+  function getNextMatchBadge(match) {
+    if (match.needsAttendanceConfirmation) return { tone: "warning", label: "Asistencia pendiente" };
+    if (match.status === "Programado") return { tone: "warning", label: "Programado" };
+    if (match.status === "Listo para programar") return { tone: "success", label: "Listo para programar" };
+    if (match.attendance && match.pendingRival) return { tone: "info", label: "Esperando rival" };
+    if (match.attendance) return { tone: "success", label: "Disponibilidad enviada" };
+    return { tone: "info", label: match.status };
+  }
+
+  const nextMatchBadge = nextMatch ? getNextMatchBadge(nextMatch) : null;
 
   return (
     <div className="page-stack player-dashboard">
@@ -85,43 +99,17 @@ export function PlayerHomePage() {
       </div>
 
       <section className="dashboard-columns dashboard-columns--featured">
-        {attendanceRequest?.needsAttendanceConfirmation ? (
-          <Card className="feature-card attendance-card">
-            <div className="section-title">
-              <span>Confirmar asistencia</span>
-              <Badge tone="warning">Requerido</Badge>
-            </div>
-            <h2>{attendanceRequest.round}</h2>
-            <p>{attendanceRequest.tournament}</p>
-            <div className="match-rival-block">
-              <Avatar src={attendanceRequest.opponentAvatar} name={attendanceRequest.opponent || "A definir"} />
-              <div>
-                <span>Rival</span>
-                <strong>{attendanceRequest.pendingRival ? "A definir" : attendanceRequest.opponent}</strong>
-              </div>
-            </div>
-            <div className="slot-grid slot-grid--compact">
-              {attendanceSlots.map((slot) => (
-                <button key={slot} className={selectedUnavailableSlots.includes(slot) ? "slot is-selected" : "slot"} type="button" onClick={() => toggleUnavailableSlot(slot)}>
-                  No puedo {slot}
-                </button>
-              ))}
-            </div>
-            <Button className="button--full" onClick={confirmAttendance}>Confirmar asistencia</Button>
-          </Card>
-        ) : null}
-
         {nextMatch ? (
           <Card className="feature-card next-match-card">
             <div className="section-title">
               <span>Proximo partido</span>
-              <Badge tone="warning">Programado</Badge>
+              <Badge tone={nextMatchBadge.tone}>{nextMatchBadge.label}</Badge>
             </div>
             <div className="match-rival-block">
-              <Avatar src={nextMatch.opponentAvatar} name={nextMatch.opponent} />
+              <Avatar src={nextMatch.opponentAvatar} name={nextMatch.opponent || "A definir"} />
               <div>
                 <span>Rival</span>
-                <strong>{nextMatch.opponent}</strong>
+                <strong>{nextMatch.pendingRival ? "A definir" : nextMatch.opponent}</strong>
               </div>
             </div>
             <div className="feature-divider" />
@@ -129,17 +117,28 @@ export function PlayerHomePage() {
             <p>
               {nextMatch.category} / {nextMatch.round}
             </p>
-            <div className="feature-meta">
-              <span>
-                <CalendarDays size={17} /> {formatDate(nextMatch.date)} - {nextMatch.time}
-              </span>
-              <span>
-                <MapPin size={17} /> {nextMatch.court}
-              </span>
-            </div>
-            <Link className="button button--orange button--lg button--full" to={`/player/matches/${nextMatch.id}`}>
-              <span>Ver partido</span>
-            </Link>
+            {nextMatch.status === "Programado" ? (
+              <div className="feature-meta">
+                <span>
+                  <CalendarDays size={17} /> {formatDate(nextMatch.date)} - {nextMatch.time}
+                </span>
+                <span>
+                  <MapPin size={17} /> {nextMatch.court}
+                </span>
+              </div>
+            ) : null}
+            {nextMatch.needsAttendanceConfirmation ? (
+              <Button className="button--full" onClick={() => setAttendanceModalOpen(true)}>Confirmar asistencia</Button>
+            ) : nextMatch.status === "Programado" ? (
+              <Link className="button button--orange button--lg button--full" to={`/player/matches/${nextMatch.id}`}>
+                <span>Ver partido</span>
+              </Link>
+            ) : (
+              <div className="info-band">
+                <strong>{nextMatch.attendance ? "Disponibilidad enviada" : nextMatch.status}</strong>
+                <span>{nextMatch.pendingRival ? "Esperando rival" : nextMatch.status === "Listo para programar" ? "Listo para programar" : "GAME esta procesando el proximo paso del partido."}</span>
+              </div>
+            )}
           </Card>
         ) : null}
 
@@ -180,6 +179,42 @@ export function PlayerHomePage() {
           </Card>
         ) : null}
       </section>
+
+      <Modal open={attendanceModalOpen} title="Confirmar asistencia" size="lg" onClose={() => setAttendanceModalOpen(false)}>
+        {attendanceRequest ? (
+          <div className="match-result-modal">
+            <div className="match-format-panel">
+              <div className="info-list">
+                <span>Torneo: {attendanceRequest.tournament}</span>
+                <span>Categoria: {attendanceRequest.category}</span>
+                <span>Ronda: {attendanceRequest.round}</span>
+                <span>Rival: {attendanceRequest.pendingRival ? "A definir" : attendanceRequest.opponent}</span>
+              </div>
+            </div>
+            <p className="muted">Marca unicamente los horarios en los que no podes jugar.</p>
+            <div className="availability-days">
+              {(attendanceRequest.availableSlotsByDay || []).map((day) => (
+                <section key={day.key} className="availability-day">
+                  <strong>{day.label}</strong>
+                  <span>{day.date ? formatDate(day.date) : ""}</span>
+                  <div className="slot-grid slot-grid--compact">
+                    {day.slots.map((slot) => (
+                      <label key={slot.id} className={selectedUnavailableSlots.includes(slot.value) ? "check-pill is-selected" : "check-pill"}>
+                        <input type="checkbox" checked={selectedUnavailableSlots.includes(slot.value)} onChange={() => toggleUnavailableSlot(slot.value)} />
+                        <strong>{slot.time}</strong>
+                      </label>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+            <div className="wizard-actions">
+              <Button variant="ghost" onClick={() => setAttendanceModalOpen(false)}>Cancelar</Button>
+              <Button onClick={confirmAttendance}>Confirmar asistencia</Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
 
       <section className="dashboard-columns">
         <Card className="results-card">

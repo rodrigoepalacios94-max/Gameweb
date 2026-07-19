@@ -180,10 +180,13 @@ export function AdminTournamentCreatePage() {
         return {
           categoryId,
           categoryName: category ? `${category.name} ${category.branch}` : "Categoria",
-          format: form.type,
+          format: "",
+          recommendedFormat: null,
+          formatStatus: "pending",
+          formatDecision: "pending",
           participants: [],
           inscriptionsCount: 0,
-          status: "Inscripciones abiertas",
+          status: "Formato pendiente",
         };
       }),
       playerCategoryId: selectedCategories[0],
@@ -196,7 +199,7 @@ export function AdminTournamentCreatePage() {
       registrationStatus: "No inscripto",
       playerTournamentStatus: "Disponible",
     });
-    navigate(`/admin/tournaments/${tournament.id}?tab=${tournament.isDevTest ? "bracket" : "summary"}`);
+    navigate(`/admin/tournaments/${tournament.id}?tab=${tournament.isDevTest ? "formats" : "summary"}`);
   }
 
   return (

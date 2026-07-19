@@ -136,6 +136,46 @@ img {
   max-width: 100%;
 }
 
+.startup-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6);
+  overflow: hidden;
+  background:
+    linear-gradient(115deg, rgba(207, 219, 47, 0.1) 0%, rgba(207, 219, 47, 0) 34%),
+    linear-gradient(235deg, rgba(241, 133, 35, 0.09) 0%, rgba(241, 133, 35, 0) 30%),
+    linear-gradient(180deg, #050607 0%, #0a0c0f 50%, #070809 100%);
+  opacity: 1;
+  transition: opacity 360ms ease, visibility 360ms ease;
+}
+
+.startup-loader--leaving {
+  visibility: hidden;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.startup-loader__animation {
+  display: grid;
+  width: min(72vw, 560px);
+  height: min(72vw, 560px);
+  max-width: min(560px, 72vh);
+  max-height: min(560px, 72vh);
+  min-width: 220px;
+  min-height: 220px;
+  place-items: center;
+}
+
+.startup-loader__animation svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
 .app-shell,
 .admin-shell {
   min-height: 100vh;
@@ -1752,7 +1792,15 @@ img {
 }
 
 .admin-table-row--formats {
-  grid-template-columns: minmax(170px, 1.2fr) minmax(110px, 0.7fr) minmax(180px, 1fr) auto auto;
+  grid-template-columns: minmax(170px, 1.1fr) minmax(115px, 0.6fr) minmax(150px, 0.85fr) minmax(190px, 1fr) minmax(130px, auto) minmax(150px, auto);
+}
+
+.admin-table-row--head {
+  background: transparent;
+  color: var(--color-muted);
+  font-size: 0.78rem;
+  font-weight: 950;
+  text-transform: uppercase;
 }
 
 .admin-table-row--requests {
@@ -1933,6 +1981,34 @@ textarea {
 .form-grid {
   display: grid;
   gap: var(--space-3);
+}
+
+.availability-days,
+.availability-day,
+.format-select-cell {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.availability-day {
+  padding: var(--space-4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.availability-day > strong {
+  color: var(--color-text);
+  font-size: 0.9rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.availability-day > span,
+.format-select-cell small {
+  color: var(--color-muted);
+  font-size: 0.78rem;
+  font-weight: 800;
 }
 
 .category-nav-card,

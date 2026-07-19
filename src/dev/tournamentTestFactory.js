@@ -3,27 +3,30 @@ import { DEFAULT_MATCH_FORMAT } from "../utils/matchFormat";
 
 const TEST_CATEGORY_ID = "cat-m4";
 const TEST_CATEGORY_NAME = "4a Masculino";
+const TEST_BOT_COUNTS = [34, 16, 24, 20, 23, 12, 18, 10];
 const BOT_AVATAR = "https://images.unsplash.com/photo-1546519638-68e109498ffc?auto=format&fit=crop&w=240&q=80";
 
 function botName(index) {
   return `Bot ${String(index).padStart(2, "0")}`;
 }
 
-function makeBot(index) {
+function makeBot(index, categoryId = TEST_CATEGORY_ID, categoryName = TEST_CATEGORY_NAME, globalIndex = index) {
+  const padded = String(index).padStart(2, "0");
+  const safeCategory = categoryId.replace(/[^a-z0-9]/gi, "-");
   return {
-    id: `test-bot-${String(index).padStart(2, "0")}`,
+    id: `test-bot-${safeCategory}-${padded}`,
     firstName: "Bot",
-    lastName: String(index).padStart(2, "0"),
+    lastName: padded,
     fullName: botName(index),
-    dni: `BOT-${String(index).padStart(4, "0")}`,
+    dni: `BOT-${safeCategory}-${padded}`,
     birthDate: "1994-01-01",
     gender: "Masculino",
     phone: "-",
-    email: `bot${String(index).padStart(2, "0")}@game.test`,
-    categoryId: TEST_CATEGORY_ID,
-    categoryName: TEST_CATEGORY_NAME,
-    ranking: index,
-    points: 1000 - index * 7,
+    email: `bot-${safeCategory}-${padded}@game.test`,
+    categoryId,
+    categoryName,
+    ranking: globalIndex,
+    points: 1000 - globalIndex * 7,
     avatar: BOT_AVATAR,
     status: "Activo",
     discipline: { faults: 0, limit: 3, status: "Sin sanciones" },
@@ -265,10 +268,50 @@ export function isTestTournamentName(name = "") {
 
 export function create34PlayerTestTournament(payload) {
   return mutateMockData((db) => {
-    const existingBots = new Set(db.players.map((player) => player.id));
-    const bots = Array.from({ length: 34 }, (_, index) => makeBot(index + 1));
-    bots.forEach((bot) => {
-      if (!existingBots.has(bot.id)) db.players.push(bot);
+    const selectedCategoryIds = payload.categories?.length ? payload.categories : [TEST_CATEGORY_ID];
+    const categoryStages = [];
+    const allBots = [];
+    const enrollments = [];
+    let globalBotIndex = 1;
+
+    selectedCategoryIds.forEach((categoryId, categoryIndex) => {
+      const category = db.categories.find((item) => item.id === categoryId);
+      const categoryName = category ? `${category.name} ${category.branch}` : categoryId;
+      const botCount = TEST_BOT_COUNTS[categoryIndex % TEST_BOT_COUNTS.length];
+      const bots = Array.from({ length: botCount }, (_, index) => {
+        const bot = makeBot(index + 1, categoryId, categoryName, globalBotIndex);
+        globalBotIndex += 1;
+        return bot;
+      });
+      allBots.push(...bots);
+      categoryStages.push({
+        categoryId,
+        categoryName,
+        format: "",
+        recommendedFormat: null,
+        formatStatus: "pending",
+        formatDecision: "pending",
+        participants: bots.map((bot) => bot.id),
+        inscriptionsCount: bots.length,
+        bracketKey: `${payload.id || "dev"}::${categoryId}`,
+        status: "Formato pendiente",
+      });
+      enrollments.push(...bots.map((bot) => ({
+        id: `test-reg-${payload.id || "dev"}-${bot.id}`,
+        tournamentId: payload.id || "dev",
+        playerId: bot.id,
+        categoryId,
+        categoryName,
+        status: "Confirmada",
+        date: payload.startDate,
+        payment: "DEV TEST",
+        isDevTest: true,
+      })));
+    });
+
+    const existingPlayers = new Set(db.players.map((player) => player.id));
+    allBots.forEach((bot) => {
+      if (!existingPlayers.has(bot.id)) db.players.push(bot);
     });
 
     const tournament = {
@@ -276,80 +319,83 @@ export function create34PlayerTestTournament(payload) {
       scoringSystem: payload.scoringSystem || "GAME 1000",
       matchFormat: payload.matchFormat || DEFAULT_MATCH_FORMAT,
       price: Number(payload.price || 0),
-      categories: [TEST_CATEGORY_ID],
-      categoryStages: [{
-        categoryId: TEST_CATEGORY_ID,
-        categoryName: TEST_CATEGORY_NAME,
-        format: "Preliminar",
-        participants: bots.map((bot) => bot.id),
-        inscriptionsCount: bots.length,
-        bracketKey: `${payload.id || "dev"}::${TEST_CATEGORY_ID}`,
-        status: "En juego",
-      }],
-      playerCategoryId: TEST_CATEGORY_ID,
-      playerCategoryName: TEST_CATEGORY_NAME,
+      categories: selectedCategoryIds,
+      categoryStages,
+      playerCategoryId: selectedCategoryIds[0],
+      playerCategoryName: categoryStages[0]?.categoryName,
       courts: ["Cancha 1", "Cancha 2", "Cancha 3", "Cancha 4"],
       isDevTest: true,
       ...payload,
-      status: "En juego",
-      categories: [TEST_CATEGORY_ID],
-      categoryStages: [{
-        categoryId: TEST_CATEGORY_ID,
-        categoryName: TEST_CATEGORY_NAME,
-        format: "Preliminar",
-        participants: bots.map((bot) => bot.id),
-        inscriptionsCount: bots.length,
-        bracketKey: `${payload.id || "dev"}::${TEST_CATEGORY_ID}`,
-        status: "En juego",
-      }],
-      playerCategoryId: TEST_CATEGORY_ID,
-      playerCategoryName: TEST_CATEGORY_NAME,
-      participants: bots.map((bot) => bot.id),
-      phases: ["Preliminar", "32avos", "Cuadro principal"],
+      status: "Inscripciones abiertas",
+      categories: selectedCategoryIds,
+      categoryStages,
+      playerCategoryId: selectedCategoryIds[0],
+      playerCategoryName: categoryStages[0]?.categoryName,
+      participants: allBots.map((bot) => bot.id),
+      phases: ["Formato pendiente"],
       name: payload.name.trim(),
-      type: "Preliminar",
     };
 
     db.tournaments.push(tournament);
-    tournament.categoryStages[0].bracketKey = `${tournament.id}::${TEST_CATEGORY_ID}`;
-    db.enrollments.push(...bots.map((bot) => ({
-      id: `test-reg-${tournament.id}-${bot.id}`,
+    tournament.categoryStages.forEach((stage) => {
+      stage.bracketKey = `${tournament.id}::${stage.categoryId}`;
+    });
+    db.enrollments.push(...enrollments.map((enrollment) => ({
+      ...enrollment,
+      id: `test-reg-${tournament.id}-${enrollment.playerId}`,
       tournamentId: tournament.id,
-      playerId: bot.id,
-      categoryId: TEST_CATEGORY_ID,
-      categoryName: TEST_CATEGORY_NAME,
-      status: "Confirmada",
-      date: tournament.startDate,
-      payment: "DEV TEST",
-      isDevTest: true,
     })));
-
-    const preliminaryMatches = pairPreliminaries(bots).map((pair, index) => createPreliminaryMatch(tournament, pair, index));
-    db.matches.push(...preliminaryMatches);
-    const initialBracket = {
-      tournamentId: tournament.id,
-      categoryId: TEST_CATEGORY_ID,
-      category: TEST_CATEGORY_NAME,
-      format: "Preliminar",
-      isDevTest: true,
-      preliminaries: preliminaryMatches.map((match) => ({
-        matchId: match.id,
-        playerA: match.playerA,
-        playerB: match.playerB,
-        status: "Programado",
-      })),
-      rounds: [],
-    };
-    db.brackets[tournament.id] = initialBracket;
-    db.brackets[`${tournament.id}::${TEST_CATEGORY_ID}`] = initialBracket;
     return tournament;
   });
 }
 
-export function simulatePreliminaryResults(tournamentId) {
+function simulateCategoryPreliminaries(db, tournament, categoryId) {
+  const prelimMatches = db.matches
+    .filter((match) => match.tournamentId === tournament.id && match.categoryId === categoryId && match.phase === "Preliminar")
+    .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+
+  prelimMatches.forEach((match, index) => {
+    const winnerIsA = index % 2 === 0;
+    const score = scoreFor(index);
+    Object.assign(match, {
+      status: "Finalizado",
+      result: score.result,
+      resultDetail: makeResultDetail(
+        score,
+        winnerIsA ? match.playerAId : match.playerBId,
+        winnerIsA ? match.playerBId : match.playerAId,
+      ),
+      sets: score.sets,
+      winnerId: winnerIsA ? match.playerAId : match.playerBId,
+      loserId: winnerIsA ? match.playerBId : match.playerAId,
+      preliminaryScore: score.score - index,
+      loserPreliminaryScore: score.score - 28 - index,
+    });
+  });
+
+  const stage = tournament.categoryStages?.find((item) => item.categoryId === categoryId);
+  const bracket = db.brackets[stage?.bracketKey] || db.brackets[`${tournament.id}::${categoryId}`];
+  if (bracket) {
+    bracket.preliminaries = prelimMatches.map((match) => ({
+      matchId: match.id,
+      playerA: match.playerA,
+      playerB: match.playerB,
+      status: match.status,
+      result: match.result,
+      winner: match.winnerId === match.playerAId ? match.playerA : match.playerB,
+    }));
+    db.brackets[`${tournament.id}::${categoryId}`] = bracket;
+  }
+  if (stage) stage.status = "Preliminares simuladas";
+  tournament.testSimulationStatus = "Simulado";
+  return { tournament, bracket, simulatedPreliminaries: prelimMatches.length };
+}
+
+export function simulatePreliminaryResults(tournamentId, categoryId = null) {
   return mutateMockData((db) => {
     const tournament = db.tournaments.find((item) => item.id === tournamentId);
     if (!tournament?.isDevTest) return null;
+    if (categoryId) return simulateCategoryPreliminaries(db, tournament, categoryId);
 
     const prelimMatches = db.matches
       .filter((match) => match.tournamentId === tournamentId && match.phase === "Preliminar")

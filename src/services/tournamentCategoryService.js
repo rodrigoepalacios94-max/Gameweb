@@ -4,6 +4,17 @@ import { mockRequest } from "./serviceUtils";
 
 export const TOURNAMENT_FORMATS = ["Preliminar", "Zonas", "Eliminacion Directa"];
 
+export function recommendTournamentFormat(participantCount = 0) {
+  const count = Number(participantCount || 0);
+  if (count <= 0) return null;
+  if ([8, 16, 32].includes(count)) return "Eliminacion Directa";
+  if (count >= 30) return "Preliminar";
+  if (count >= 20) return "Zonas";
+  if ([7, 9, 14, 15, 17, 18].includes(count)) return "Eliminacion Directa";
+  if (count >= 10) return "Zonas";
+  return "Eliminacion Directa";
+}
+
 export function getCategoryLabel(category) {
   if (!category) return "Categoria";
   return `${category.name} ${category.branch}`;
@@ -46,14 +57,21 @@ export function ensureTournamentCategoryStages(db, tournament) {
     const legacy = legacyParticipants(db, tournament, categoryId);
     const participantIds = [...new Set([...(existingByCategory.get(categoryId)?.participants || []), ...enrolled, ...legacy])];
     const previous = existingByCategory.get(categoryId) || {};
+    const recommendedFormat = participantIds.length ? recommendTournamentFormat(participantIds.length) : null;
+    const formatStatus = previous.formatStatus || (participantIds.length ? (previous.format ? "confirmed" : "pending") : "empty");
+    const format = previous.format || (formatStatus === "confirmed" ? (index === 0 ? tournament.type : "Eliminacion Directa") : "");
+    const status = previous.status || (participantIds.length ? (formatStatus === "confirmed" ? tournament.status : "Formato pendiente") : "Sin inscriptos");
 
     return {
       id: previous.id || `${tournament.id}-${categoryId}`,
       tournamentId: tournament.id,
       categoryId,
       categoryName: previous.categoryName || getCategoryLabel(category),
-      status: previous.status || tournament.status,
-      format: previous.format || (index === 0 ? tournament.type : "Eliminacion Directa"),
+      status,
+      format,
+      formatStatus,
+      formatDecision: previous.formatDecision || (formatStatus === "confirmed" ? "legacy" : "pending"),
+      recommendedFormat: previous.recommendedFormat || recommendedFormat,
       matchFormat: previous.matchFormat || tournament.matchFormat || DEFAULT_MATCH_FORMAT,
       participants: participantIds,
       inscriptionsCount: participantIds.length,
@@ -212,6 +230,13 @@ export function generateCategoryBracketInDb(db, tournamentId, categoryId) {
   const stages = ensureTournamentCategoryStages(db, tournament);
   const stage = stages.find((item) => item.categoryId === categoryId);
   if (!stage) return null;
+  if (!stage.participants?.length) {
+    stage.status = "Sin inscriptos";
+    stage.formatStatus = "empty";
+    return null;
+  }
+  if (stage.formatStatus && stage.formatStatus !== "confirmed") return null;
+  if (!TOURNAMENT_FORMATS.includes(stage.format)) return null;
 
   db.matches = db.matches.filter((match) => !(match.tournamentId === tournamentId && match.categoryId === categoryId && !match.result));
   const players = stage.participants.map((playerId) => getPlayerById(db, playerId)).filter(Boolean);
@@ -259,9 +284,26 @@ export const tournamentCategoryService = {
     return mockRequest(() => mutateMockData((db) => {
       const tournament = db.tournaments.find((item) => item.id === tournamentId);
       if (!tournament) return null;
-      ensureTournamentCategoryStages(db, tournament);
+      const stages = ensureTournamentCategoryStages(db, tournament);
       tournament.status = "Inscripciones cerradas";
       tournament.registrationClosedBy = actor;
+      stages.forEach((stage) => {
+        stage.inscriptionsCount = stage.participants?.length || 0;
+        stage.recommendedFormat = recommendTournamentFormat(stage.inscriptionsCount);
+        if (!stage.inscriptionsCount) {
+          stage.status = "Sin inscriptos";
+          stage.formatStatus = "empty";
+          stage.format = "";
+          stage.formatDecision = "empty";
+          return;
+        }
+        if (stage.formatStatus !== "confirmed") {
+          stage.format = stage.format || stage.recommendedFormat;
+          stage.status = "Formato sugerido";
+          stage.formatStatus = "suggested";
+          stage.formatDecision = "suggested";
+        }
+      });
       return tournament;
     }), "No pudimos cerrar inscripciones.");
   },
@@ -269,11 +311,58 @@ export const tournamentCategoryService = {
     return mockRequest(() => mutateMockData((db) => {
       const tournament = db.tournaments.find((item) => item.id === tournamentId);
       if (!tournament || !TOURNAMENT_FORMATS.includes(format)) return null;
+      if (tournament.status === "Inscripciones abiertas") return null;
       const stage = ensureTournamentCategoryStages(db, tournament).find((item) => item.categoryId === categoryId);
       if (!stage) return null;
       stage.format = format;
+      stage.formatDecision = format === stage.recommendedFormat ? "suggested" : "manual";
+      if (stage.formatStatus === "pending") stage.formatStatus = "suggested";
+      if (stage.status === "Formato pendiente") stage.status = "Formato sugerido";
       return stage;
     }), "No pudimos actualizar formato por categoria.");
+  },
+  async confirmCategoryFormat(tournamentId, categoryId, format) {
+    return mockRequest(() => mutateMockData((db) => {
+      const tournament = db.tournaments.find((item) => item.id === tournamentId);
+      if (!tournament || !TOURNAMENT_FORMATS.includes(format)) return null;
+      if (tournament.status === "Inscripciones abiertas") return null;
+      const stage = ensureTournamentCategoryStages(db, tournament).find((item) => item.categoryId === categoryId);
+      if (!stage) return null;
+      if (!stage.inscriptionsCount) {
+        stage.status = "Sin inscriptos";
+        stage.formatStatus = "empty";
+        return stage;
+      }
+      stage.format = format;
+      stage.recommendedFormat = stage.recommendedFormat || recommendTournamentFormat(stage.inscriptionsCount);
+      stage.formatDecision = format === stage.recommendedFormat ? "suggested" : "manual";
+      stage.formatStatus = "confirmed";
+      stage.status = "Formato confirmado";
+      generateCategoryBracketInDb(db, tournamentId, categoryId);
+      return stage;
+    }), "No pudimos confirmar formato por categoria.");
+  },
+  async confirmAllCategoryFormats(tournamentId) {
+    return mockRequest(() => mutateMockData((db) => {
+      const tournament = db.tournaments.find((item) => item.id === tournamentId);
+      if (!tournament) return [];
+      if (tournament.status === "Inscripciones abiertas") return [];
+      return ensureTournamentCategoryStages(db, tournament).map((stage) => {
+        const format = stage.format || stage.recommendedFormat || recommendTournamentFormat(stage.inscriptionsCount);
+        if (!format) {
+          stage.status = "Sin inscriptos";
+          stage.formatStatus = "empty";
+          return stage;
+        }
+        stage.format = format;
+        stage.recommendedFormat = stage.recommendedFormat || recommendTournamentFormat(stage.inscriptionsCount);
+        stage.formatDecision = format === stage.recommendedFormat ? "suggested" : "manual";
+        stage.formatStatus = "confirmed";
+        stage.status = "Formato confirmado";
+        generateCategoryBracketInDb(db, tournamentId, stage.categoryId);
+        return stage;
+      });
+    }), "No pudimos confirmar formatos por categoria.");
   },
   async generateCategoryBracket(tournamentId, categoryId) {
     return mockRequest(() => mutateMockData((db) => generateCategoryBracketInDb(db, tournamentId, categoryId)), "No pudimos generar cuadro por categoria.");

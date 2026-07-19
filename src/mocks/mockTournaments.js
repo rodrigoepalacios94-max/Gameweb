@@ -11,6 +11,7 @@ export const mockTournaments = [
     scoringSystem: "GAME 1000",
     matchFormat: { bestOfSets: 3, gamesPerSet: 6, useSuperTiebreak: true, superTiebreakInDecidingSet: true },
     price: 18000,
+    schedule: { saturday: ["09:00", "12:00", "16:00"], sunday: ["09:00", "12:00", "16:00"] },
     categories: ["cat-m3", "cat-m4", "cat-m5", "cat-f4"],
     categoryStages: [
       { categoryId: "cat-m3", categoryName: "3a Masculino", format: "Eliminacion Directa", participants: ["player-5"], inscriptionsCount: 1, bracketKey: "tour-1::cat-m3", status: "Inscripciones abiertas" },
@@ -38,6 +39,7 @@ export const mockTournaments = [
     scoringSystem: "MASTER GAME 1500",
     matchFormat: { bestOfSets: 3, gamesPerSet: 6, useSuperTiebreak: true, superTiebreakInDecidingSet: true },
     price: 24000,
+    schedule: { saturday: ["10:00", "13:00", "16:00"], sunday: ["09:00", "12:00"] },
     categories: ["cat-m2", "cat-m3", "cat-f3", "cat-f4"],
     categoryStages: [
       { categoryId: "cat-m2", categoryName: "2a Masculino", format: "Zonas", participants: [], inscriptionsCount: 0, bracketKey: "tour-2::cat-m2", status: "Apertura pendiente" },
@@ -65,6 +67,7 @@ export const mockTournaments = [
     scoringSystem: "GAME 500",
     matchFormat: { bestOfSets: 3, gamesPerSet: 6, useSuperTiebreak: true, superTiebreakInDecidingSet: true },
     price: 14000,
+    schedule: { saturday: ["10:30", "14:00", "18:00"], sunday: ["10:30", "16:00"] },
     categories: ["cat-m4", "cat-m5", "cat-m6", "cat-f5"],
     categoryStages: [
       { categoryId: "cat-m4", categoryName: "4a Masculino", format: "Eliminacion Directa", participants: ["player-1", "player-2", "player-3", "player-4"], inscriptionsCount: 4, bracketKey: "tour-3::cat-m4", status: "En juego" },
@@ -92,6 +95,7 @@ export const mockTournaments = [
     scoringSystem: "GAME 250",
     matchFormat: { bestOfSets: 3, gamesPerSet: 6, useSuperTiebreak: true, superTiebreakInDecidingSet: true },
     price: 11000,
+    schedule: { saturday: ["09:00", "12:00", "15:00"], sunday: ["09:00", "12:00"] },
     categories: ["cat-m4", "cat-m5", "cat-f4", "cat-f5"],
     categoryStages: [
       { categoryId: "cat-m4", categoryName: "4a Masculino", format: "Preliminar", participants: ["player-1", "player-2", "player-3", "player-4"], inscriptionsCount: 4, bracketKey: "tour-4::cat-m4", status: "Finalizado" },

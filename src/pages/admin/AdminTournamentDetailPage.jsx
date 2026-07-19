@@ -69,7 +69,7 @@ export function AdminTournamentDetailPage() {
   const categoryRegistrations = registrations.filter((registration) => registration.categoryId === activeCategoryId);
 
   async function simulatePreliminaries() {
-    await tournamentService.simulateTestPreliminaries(tournament.id);
+    await tournamentService.simulateTestPreliminaries(tournament.id, activeCategoryId);
     setTab("bracket");
     reload();
   }
@@ -84,14 +84,14 @@ export function AdminTournamentDetailPage() {
     reload();
   }
 
-  async function generateBracket(categoryId = activeCategoryId) {
-    await tournamentService.generateCategoryBracket(tournament.id, categoryId);
+  async function confirmFormat(categoryId, format) {
+    await tournamentService.confirmCategoryFormat(tournament.id, categoryId, format);
     setTab("bracket");
     reload();
   }
 
-  async function generateAllBrackets() {
-    await tournamentService.generateAllCategoryBrackets(tournament.id);
+  async function confirmAllFormats() {
+    await tournamentService.confirmAllCategoryFormats(tournament.id);
     setTab("bracket");
     reload();
   }
@@ -141,12 +141,10 @@ export function AdminTournamentDetailPage() {
         </div>
       </header>
 
-      <Tabs tabs={tabs} activeTab={activeTab} onChange={setTab} />
-
       <Card className="category-nav-card">
         <div className="section-title">
           <span>Categoria seleccionada</span>
-          <Badge tone="info">{activeStage?.format || tournament.type}</Badge>
+          <Badge tone="info">{activeStage?.format || activeStage?.recommendedFormat || "Formato pendiente"}</Badge>
         </div>
         <div className="category-selector-row">
           <select value={activeCategoryId || ""} onChange={(event) => setSelectedCategoryId(event.target.value)}>
@@ -158,6 +156,8 @@ export function AdminTournamentDetailPage() {
           <span>Cuadro independiente: {activeStage?.bracketKey}</span>
         </div>
       </Card>
+
+      <Tabs tabs={tabs} activeTab={activeTab} onChange={setTab} />
 
       {activeTab === "summary" ? (
         <div className="detail-grid">
@@ -197,24 +197,53 @@ export function AdminTournamentDetailPage() {
         <Card>
           <div className="section-title">
             <span>Configurar formatos por categoria</span>
-            <Button variant="outline-green" size="sm" onClick={generateAllBrackets}>Generar todos los cuadros</Button>
+            <Button variant="outline-green" size="sm" disabled={tournament.status === "Inscripciones abiertas"} onClick={confirmAllFormats}>Confirmar formatos</Button>
           </div>
+          {tournament.status === "Inscripciones abiertas" ? (
+            <div className="info-band">
+              <strong>Inscripciones abiertas</strong>
+              <span>Cerra inscripciones para que GAME cuente participantes y proponga formatos por categoria.</span>
+              <Button variant="outline-green" size="sm" onClick={closeRegistrations}>Cerrar inscripciones</Button>
+            </div>
+          ) : null}
           <div className="admin-table">
-            {stages.map((stage) => (
-              <div key={stage.categoryId} className="admin-table-row admin-table-row--formats">
-                <strong>{stage.categoryName}</strong>
-                <span>{stage.inscriptionsCount} inscriptos</span>
-                <select value={stage.format} onChange={(event) => updateFormat(stage.categoryId, event.target.value)}>
-                  {TOURNAMENT_FORMATS.map((format) => <option key={format} value={format}>{format}</option>)}
-                </select>
-                <Badge tone={stage.status === "Cuadro generado" ? "success" : "info"}>{stage.status}</Badge>
-                <Button size="sm" variant="secondary" onClick={() => generateBracket(stage.categoryId)}>Generar cuadro</Button>
-              </div>
-            ))}
+            <div className="admin-table-row admin-table-row--formats admin-table-row--head">
+              <strong>Categoria</strong>
+              <span>Participantes</span>
+              <span>Formato sugerido</span>
+              <span>Formato</span>
+              <span>Estado</span>
+              <span>Accion</span>
+            </div>
+            {stages.map((stage) => {
+              const participantCount = registrations.filter((registration) => registration.categoryId === stage.categoryId && registration.status !== "Rechazada").length || stage.inscriptionsCount || 0;
+              const selectedFormat = stage.format || stage.recommendedFormat || "";
+              const hasParticipants = participantCount > 0;
+              const isConfirmed = stage.formatStatus === "confirmed" || stage.status === "Cuadro generado";
+              const isSuggested = stage.formatDecision !== "manual" && selectedFormat && selectedFormat === stage.recommendedFormat;
+              return (
+                <div key={stage.categoryId} className="admin-table-row admin-table-row--formats">
+                  <strong>{stage.categoryName}</strong>
+                  <span>{hasParticipants ? participantCount : "Sin inscriptos"}</span>
+                  <span>{stage.recommendedFormat || "Sin sugerencia"}</span>
+                  <div className="format-select-cell">
+                    <select value={selectedFormat} disabled={tournament.status === "Inscripciones abiertas" || !hasParticipants} onChange={(event) => updateFormat(stage.categoryId, event.target.value)}>
+                      <option value="" disabled>Formato pendiente</option>
+                      {TOURNAMENT_FORMATS.map((format) => <option key={format} value={format}>{format}</option>)}
+                    </select>
+                    {isSuggested ? <small>Sugerido por GAME</small> : selectedFormat ? <small>Modificado manualmente</small> : null}
+                  </div>
+                  <Badge tone={stage.status === "Cuadro generado" || isConfirmed ? "success" : stage.status === "Sin inscriptos" ? "neutral" : "info"}>{stage.status}</Badge>
+                   <Button size="sm" variant="secondary" disabled={tournament.status === "Inscripciones abiertas" || !hasParticipants || !selectedFormat || isConfirmed} onClick={() => confirmFormat(stage.categoryId, selectedFormat)}>
+                    {isConfirmed ? "Confirmado" : "Confirmar formato"}
+                  </Button>
+                </div>
+              );
+            })}
           </div>
           <div className="info-band">
             <strong>Regla aplicada</strong>
-            <span>El formato se decide despues del cierre de inscripciones y se guarda por categoria, no para todo el torneo.</span>
+            <span>El formato se decide despues del cierre de inscripciones, GAME solo recomienda y el profesor confirma o cambia la eleccion antes de generar la estructura deportiva.</span>
           </div>
         </Card>
       ) : null}
@@ -338,8 +367,8 @@ export function AdminTournamentDetailPage() {
                 <strong>Torneo Prueba</strong>
                 <span>{participants.length} bots inscriptos en {activeStage?.categoryName} / {matches.filter((match) => match.phase === "Preliminar").length} preliminares generadas.</span>
               </div>
-              <Button disabled={tournament.testSimulationStatus === "Simulado"} onClick={simulatePreliminaries}>
-                {tournament.testSimulationStatus === "Simulado" ? "Preliminares simuladas" : "Simular preliminares"}
+              <Button disabled={tournament.testSimulationStatus === "Simulado" || !matches.some((match) => match.phase === "Preliminar")} onClick={simulatePreliminaries}>
+                {tournament.testSimulationStatus === "Simulado" ? "Preliminares simuladas" : matches.some((match) => match.phase === "Preliminar") ? "Simular preliminares" : "Sin preliminares"}
               </Button>
             </div>
           ) : null}
