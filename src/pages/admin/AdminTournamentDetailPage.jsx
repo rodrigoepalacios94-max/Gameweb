@@ -271,7 +271,7 @@ export function AdminTournamentDetailPage() {
       ) : null}
 
       {activeTab === "bracket" ? (
-        <Card className="bracket-card">
+        <Card className="bracket-card" key={activeCategoryId}>
           <div className="section-title">
             <span>Cuadro / llave - {activeStage?.categoryName}</span>
             <GitBranch size={18} />
@@ -279,7 +279,7 @@ export function AdminTournamentDetailPage() {
           {tournament.isDevTest ? (
             <div className="dev-test-panel">
               <div>
-                <strong>Torneo Prueba</strong>
+                <strong>{tournament.isTorneoGameFixture ? "Torneo GAME DEV" : "Torneo Prueba"}</strong>
                 <span>{participants.length} bots inscriptos en {activeStage?.categoryName} / {(bracket?.preliminaries || []).filter((match) => match.matchId).length} preliminares generadas.</span>
               </div>
               <Button disabled={tournament.testSimulationStatus === "Simulado" || !matches.some((match) => match.phase === "Preliminar")} onClick={simulatePreliminaries}>
@@ -292,7 +292,7 @@ export function AdminTournamentDetailPage() {
               {bracket.zones.map((zone) => (
                 <div key={zone.id} className="zone-card">
                   <strong>{zone.name}</strong>
-                  <span>Clasifican {zone.qualifiers} jugadores</span>
+                  <span>{zone.qualifiers ? `Clasifican ${zone.qualifiers} jugadores` : "Clasificacion pendiente"}</span>
                   {zone.players.map((player) => <span key={player}>{player}</span>)}
                 </div>
               ))}
@@ -315,7 +315,7 @@ export function AdminTournamentDetailPage() {
               {bracket.zones.map((zone) => (
                 <div key={zone.id} className="zone-card">
                   <strong>{zone.name}</strong>
-                  <span>Clasifican {zone.qualifiers} jugadores</span>
+                  <span>{zone.qualifiers ? `Clasifican ${zone.qualifiers} jugadores` : "Clasificacion pendiente"}</span>
                   {zone.players.map((player) => <span key={player}>{player}</span>)}
                 </div>
               ))}

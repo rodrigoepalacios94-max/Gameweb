@@ -238,31 +238,37 @@ function buildDirectElimination(db, tournament, stage, players) {
 
 function buildPreliminaries(db, tournament, stage, players) {
   const sorted = sortByRanking(players);
+  const preliminaryBye = sorted.length % 2 === 1 ? sorted[0] : null;
+  const playablePlayers = preliminaryBye ? sorted.slice(1) : sorted;
   const pairs = [];
-  for (let index = 0; index < sorted.length; index += 2) {
-    pairs.push([sorted[index], sorted[index + 1]]);
+  for (let index = 0; index < playablePlayers.length; index += 2) {
+    pairs.push([playablePlayers[index], playablePlayers[index + 1]]);
   }
 
-  return pairs.map(([playerA, playerB], index) => {
-    if (!playerB) {
+  const byeEntry = preliminaryBye ? [{
+    playerA: preliminaryBye.fullName,
+    playerB: "BYE",
+    status: "Bye preliminar",
+    result: "Clasifica directo por ranking de categoria",
+    winner: preliminaryBye.fullName,
+    bye: true,
+    byePlayerId: preliminaryBye.id,
+  }] : [];
+
+  return [
+    ...byeEntry,
+    ...pairs.map(([playerA, playerB], index) => {
+      const bracketMatch = makeBracketMatch(`${stage.categoryId}-pre-${index + 1}`, playerA, playerB);
+      const round = { id: `${stage.categoryId}-preliminar`, name: "Preliminar" };
+      const match = createMatchFromBracket(db, tournament, stage, round, bracketMatch, index, "Preliminar");
       return {
+        matchId: match?.id,
         playerA: playerA.fullName,
-        playerB: "A definir",
-        status: "Clasifica directo",
-        result: "Sin rival preliminar",
-        winner: playerA.fullName,
+        playerB: playerB.fullName,
+        status: match?.status || "Pendiente",
       };
-    }
-    const bracketMatch = makeBracketMatch(`${stage.categoryId}-pre-${index + 1}`, playerA, playerB);
-    const round = { id: `${stage.categoryId}-preliminar`, name: "Preliminar" };
-    const match = createMatchFromBracket(db, tournament, stage, round, bracketMatch, index, "Preliminar");
-    return {
-      matchId: match?.id,
-      playerA: playerA.fullName,
-      playerB: playerB.fullName,
-      status: match?.status || "Pendiente",
-    };
-  });
+    }),
+  ];
 }
 
 function buildPreliminarySkeletonRounds(stage, participantCount) {
@@ -408,7 +414,6 @@ export function buildPreliminaryBracketFromResults(db, tournament, categoryId) {
 
   db.brackets[stage.bracketKey] = bracket;
   db.brackets[`${tournament.id}::${categoryId}`] = bracket;
-  if (tournament.playerCategoryId === categoryId) db.brackets[tournament.id] = bracket;
   stage.status = "Cuadro generado";
   return bracket;
 }
@@ -511,6 +516,8 @@ export function generateCategoryBracketInDb(db, tournamentId, categoryId) {
     bracket.rounds = buildPreliminarySkeletonRounds(stage, players.length);
     bracket.preliminarySummary = {
       participants: players.length,
+      preliminaryByes: bracket.preliminaries.filter((match) => match.bye).length,
+      preliminaryByePlayer: bracket.preliminaries.find((match) => match.bye)?.winner || null,
       preliminaries: bracket.preliminaries.filter((match) => match.matchId).length,
       mainDrawSize: largestStandardDraw(players.length),
     };
@@ -528,9 +535,6 @@ export function generateCategoryBracketInDb(db, tournamentId, categoryId) {
   }
 
   db.brackets[stage.bracketKey] = bracket;
-  if (!db.brackets[tournamentId] || db.brackets[tournamentId]?.categoryId === categoryId || tournament.playerCategoryId === categoryId) {
-    db.brackets[tournamentId] = bracket;
-  }
   stage.status = "Cuadro generado";
   stage.progress = {
     totalMatches: bracket.rounds.reduce((total, round) => total + round.matches.length, 0) + bracket.preliminaries.length,

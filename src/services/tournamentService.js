@@ -1,4 +1,4 @@
-import { create34PlayerTestTournament, getTestTournamentDiagnostics as getDevTestTournamentDiagnostics, isTestTournamentName, simulatePreliminaryResults } from "../dev/tournamentTestFactory";
+import { createDevTestTournament, getTestTournamentDiagnostics as getDevTestTournamentDiagnostics, isTestTournamentName, simulatePreliminaryResults } from "../dev/tournamentTestFactory";
 import { createMockId, mutateMockData, readMockData } from "../mocks/mockDatabase";
 import { DEFAULT_MATCH_FORMAT } from "../utils/matchFormat";
 import { auditService } from "./auditService";
@@ -26,6 +26,7 @@ export const tournamentService = {
       const tournament = db.tournaments.find((item) => item.id === id);
       if (tournament) ensureTournamentCategoryStages(db, tournament);
       const key = getBracketKey(tournament, categoryId);
+      if (categoryId) return db.brackets[key] || null;
       return db.brackets[key] || db.brackets[id] || null;
     }), "No pudimos cargar el cuadro.");
   },
@@ -55,7 +56,7 @@ export const tournamentService = {
     return mockRequest(async () => {
       const shouldUseDevFactory = isTestTournamentName(payload.name);
       const tournament = shouldUseDevFactory
-        ? create34PlayerTestTournament(payload)
+        ? createDevTestTournament(payload)
         : mutateMockData((db) => {
             const created = {
               id: createMockId("tour"),

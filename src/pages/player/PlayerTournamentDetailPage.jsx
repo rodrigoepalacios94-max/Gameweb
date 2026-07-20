@@ -53,6 +53,7 @@ export function PlayerTournamentDetailPage() {
     { id: "matches", label: "Partidos" },
     ...(bracket?.zones?.length ? [{ id: "standings", label: "Zonas" }] : []),
   ];
+  const activeTab = tabs.some((item) => item.id === tab) ? tab : "bracket";
   const activeStage = stages.find((stage) => stage.categoryId === activeCategoryId) || stages[0];
   const visibleCategoryIds = new Set(stages.map((stage) => stage.categoryId));
   const visibleCategories = categories.filter((category) => visibleCategoryIds.has(category.id));
@@ -88,9 +89,9 @@ export function PlayerTournamentDetailPage() {
         </div>
       </Card>
 
-      <Tabs tabs={tabs} activeTab={tab} onChange={setTab} />
+      <Tabs tabs={tabs} activeTab={activeTab} onChange={setTab} />
 
-      {tab === "summary" ? (
+      {activeTab === "summary" ? (
         <div className="detail-grid">
           <Card>
             <h2>Informacion general</h2>
@@ -119,7 +120,7 @@ export function PlayerTournamentDetailPage() {
         </div>
       ) : null}
 
-      {tab === "participants" ? (
+      {activeTab === "participants" ? (
         <Card>
           <h2>Participantes mock - {activeStage?.categoryName}</h2>
           <div className="participant-grid">
@@ -136,7 +137,7 @@ export function PlayerTournamentDetailPage() {
         </Card>
       ) : null}
 
-      {tab === "matches" ? (
+      {activeTab === "matches" ? (
         <Card>
           <h2>Partidos del torneo - {activeStage?.categoryName}</h2>
           {matches.length ? (
@@ -155,8 +156,8 @@ export function PlayerTournamentDetailPage() {
         </Card>
       ) : null}
 
-      {tab === "bracket" ? (
-        <Card className="bracket-card">
+      {activeTab === "bracket" ? (
+        <Card className="bracket-card" key={activeCategoryId}>
           <div className="section-title">
             <span>Cuadro / llave - {activeStage?.categoryName}</span>
             <GitBranch size={18} />
@@ -168,14 +169,14 @@ export function PlayerTournamentDetailPage() {
                   {bracket.zones.map((zone) => (
                     <div key={zone.id} className="zone-card">
                       <strong>{zone.name}</strong>
-                      <span>Clasifican {zone.qualifiers} jugadores</span>
+                      <span>{zone.qualifiers ? `Clasifican ${zone.qualifiers} jugadores` : "Clasificacion pendiente"}</span>
                       {zone.players.map((player) => <span key={player}>{player}</span>)}
                     </div>
                   ))}
                 </div>
               ) : null}
               <PreliminaryMatches preliminaries={bracket.preliminaries || []} />
-              <TournamentBracket bracket={bracket} />
+              {bracket.rounds?.length ? <TournamentBracket bracket={bracket} /> : null}
             </>
           ) : (
             <EmptyState title="Cuadro no disponible" description="La llave mock todavia no fue generada para este torneo." />
@@ -183,14 +184,14 @@ export function PlayerTournamentDetailPage() {
         </Card>
       ) : null}
 
-      {tab === "standings" ? (
+      {activeTab === "standings" ? (
         <Card>
           <h2>Zonas y clasificacion - {activeStage?.categoryName}</h2>
           <div className="zone-grid">
             {(bracket?.zones || []).map((zone) => (
               <div key={zone.id} className="zone-card">
                 <strong>{zone.name}</strong>
-                <span>Clasifican {zone.qualifiers} jugadores</span>
+                <span>{zone.qualifiers ? `Clasifican ${zone.qualifiers} jugadores` : "Clasificacion pendiente"}</span>
                 {zone.players.map((player) => <span key={player}>{player}</span>)}
               </div>
             ))}

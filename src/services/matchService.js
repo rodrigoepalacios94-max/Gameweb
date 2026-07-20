@@ -239,7 +239,7 @@ function clearDownstreamIfNeeded(nextMatch, winner) {
 function advanceBracketWinner(db, match) {
   const tournament = getTournament(db, match.tournamentId);
   const categoryStage = tournament ? ensureTournamentCategoryStages(db, tournament).find((stage) => stage.categoryId === match.categoryId) : null;
-  const bracket = db.brackets[categoryStage?.bracketKey] || db.brackets[match.tournamentId];
+  const bracket = categoryStage ? db.brackets[categoryStage.bracketKey] : db.brackets[match.tournamentId];
   if (!bracket || !tournament) return;
 
   bracket.preliminaries = (bracket.preliminaries || []).map((preliminary) => {

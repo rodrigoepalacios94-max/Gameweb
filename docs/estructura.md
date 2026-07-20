@@ -1224,3 +1224,13 @@ Las secciones Cuadro, Partidos, Participantes, Programacion y Disciplina deben m
 Las suspensiones de resto de jornada y fin de semana se ejecutan desde Ajustes o desde Programacion, siempre con confirmacion visual del sistema antes de aplicar las reglas existentes de suspension y reprogramacion.
 
 La accion Finalizar torneo debe estar visible en el encabezado como accion critica. Si quedan partidos sin finalizar, GAME debe mostrar una confirmacion explicita indicando la cantidad de partidos pendientes. Si el profesor confirma, el torneo puede cerrarse igualmente, sin inventar resultados ni modificar automaticamente partidos pendientes.
+
+## BYE PRELIMINAR POR CANTIDAD IMPAR
+
+Cuando una categoria utiliza formato Preliminar y la cantidad de jugadores de esa categoria es impar, GAME debe asignar un bye preliminar al jugador mejor ubicado en el ranking de esa misma categoria.
+
+Ese bye preliminar solo resuelve la imposibilidad matematica de emparejar a todos los jugadores en la etapa preliminar inicial.
+
+No debe confundirse con los byes o rondas previas posteriores al cierre de preliminares, que se definen segun rendimiento preliminar y las reglas deportivas del formato.
+
+El ranking utilizado para este bye debe ser siempre el ranking correspondiente a la categoria seleccionada. No se debe comparar jugadores de distintas categorias para definir cabezas, byes o desempates deportivos.
