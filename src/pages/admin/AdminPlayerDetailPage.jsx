@@ -1,22 +1,30 @@
 import { Link, useParams } from "react-router-dom";
+import { useState } from "react";
 import { Ban, Pencil, RotateCcw, ShieldAlert } from "lucide-react";
 import { Avatar } from "../../components/common/Avatar";
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
+import { ConfirmModal } from "../../components/common/ConfirmModal";
 import { EmptyState } from "../../components/common/EmptyState";
 import { ErrorState } from "../../components/common/ErrorState";
 import { LoadingState } from "../../components/common/LoadingState";
+import { Modal } from "../../components/common/Modal";
 import { useAsyncData } from "../../hooks/useAsyncData";
 import { categoryRequestService } from "../../services/categoryRequestService";
 import { disciplineService } from "../../services/disciplineService";
 import { matchService } from "../../services/matchService";
 import { playerService } from "../../services/playerService";
+import { rankingService } from "../../services/rankingService";
 import { tournamentService } from "../../services/tournamentService";
 import { formatDate } from "../../utils/formatters";
 
 export function AdminPlayerDetailPage() {
   const { id } = useParams();
+  const [confirmAction, setConfirmAction] = useState(null);
+  const [pointsModalOpen, setPointsModalOpen] = useState(false);
+  const [pointsForm, setPointsForm] = useState({ mode: "sumar", points: "", reason: "" });
+  const [benefitForm, setBenefitForm] = useState({ percentage: "0", months: "1", indefinite: false });
   const { data, loading, error, reload } = useAsyncData(async () => {
     const [player, matches, tournaments, requests, discipline] = await Promise.all([
       playerService.getPlayerById(id),
@@ -43,9 +51,49 @@ export function AdminPlayerDetailPage() {
     return <EmptyState title="Jugador no encontrado" description="No existe un jugador mock con ese identificador." />;
   }
 
+  const isBlocked = player.status.includes("Bloqueado");
+
+  async function blockPlayer() {
+    await disciplineService.blockPlayer(player.id);
+    setConfirmAction(null);
+    reload();
+  }
+
+  async function unblockPlayer() {
+    await disciplineService.unblockPlayer(player.id);
+    setConfirmAction(null);
+    reload();
+  }
+
+  async function submitPoints(event) {
+    event.preventDefault();
+    const rawPoints = Number(pointsForm.points);
+    const points = pointsForm.mode === "restar" ? -Math.abs(rawPoints) : Math.abs(rawPoints);
+    await rankingService.adjustPoints({
+      playerId: player.id,
+      concept: "Ajuste manual de puntos",
+      points,
+      reason: pointsForm.reason.trim(),
+    });
+    setPointsModalOpen(false);
+    setPointsForm({ mode: "sumar", points: "", reason: "" });
+    reload();
+  }
+
+  async function saveBenefit(event) {
+    event.preventDefault();
+    await playerService.saveBenefit(player.id, benefitForm);
+    reload();
+  }
+
+  async function resetBenefit() {
+    await playerService.resetBenefit(player.id);
+    reload();
+  }
+
   return (
     <div className="page-stack">
-      <section className="profile-header">
+      <section className={isBlocked ? "profile-header profile-header--danger" : "profile-header"}>
         <Avatar src={player.avatar} name={player.fullName} size="xl" />
         <div>
           <span className="eyebrow">Detalle jugador</span>
@@ -61,10 +109,12 @@ export function AdminPlayerDetailPage() {
       </section>
 
       <div className="card-actions">
-        <Button variant="secondary" icon={Pencil}>Cambiar categoria</Button>
-        <Button variant="secondary" icon={Pencil}>Modificar ranking/puntos</Button>
-        <Button variant="ghost" icon={Ban}>Bloquear</Button>
-        <Button variant="ghost" icon={RotateCcw}>Desbloquear</Button>
+        <Button variant="secondary" icon={Pencil} onClick={() => setPointsModalOpen(true)}>Modificar puntos</Button>
+        {isBlocked ? (
+          <Button variant="outline-green" icon={RotateCcw} onClick={() => setConfirmAction("unblock")}>Desbloquear jugador</Button>
+        ) : (
+          <Button variant="danger" icon={Ban} onClick={() => setConfirmAction("block")}>Bloquear jugador</Button>
+        )}
       </div>
 
       <div className="detail-grid">
@@ -89,6 +139,37 @@ export function AdminPlayerDetailPage() {
           </div>
         </Card>
       </div>
+
+      <Card>
+        <div className="section-title">
+          <span>Beneficio</span>
+          {player.benefit ? <Badge tone="success">{player.benefit.percentage}% descuento</Badge> : <Badge tone="neutral">Sin beneficio</Badge>}
+        </div>
+        <form className="benefit-grid" onSubmit={saveBenefit}>
+          <label>Porcentaje de descuento
+            <select value={benefitForm.percentage} onChange={(event) => setBenefitForm((current) => ({ ...current, percentage: event.target.value }))}>
+              {[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((value) => <option key={value} value={value}>{value}%</option>)}
+            </select>
+          </label>
+          <label>Duracion
+            <select value={benefitForm.indefinite ? "indefinido" : benefitForm.months} onChange={(event) => setBenefitForm((current) => ({ ...current, indefinite: event.target.value === "indefinido", months: event.target.value === "indefinido" ? current.months : event.target.value }))}>
+              {Array.from({ length: 12 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{value} mes{value > 1 ? "es" : ""}</option>)}
+              <option value="indefinido">Indefinido</option>
+            </select>
+          </label>
+          <div className="card-actions">
+            <Button type="submit">Guardar beneficio</Button>
+            <Button variant="ghost" type="button" onClick={resetBenefit}>Restablecer beneficio</Button>
+          </div>
+        </form>
+        {player.benefit ? (
+          <div className="info-list">
+            <span>Inicio: {formatDate(player.benefit.startedAt)}</span>
+            <span>Vencimiento: {player.benefit.indefinite ? "Indefinido" : formatDate(player.benefit.expiresAt)}</span>
+            <span>Ejemplo: con {player.benefit.percentage}% de beneficio paga {100 - player.benefit.percentage}%.</span>
+          </div>
+        ) : null}
+      </Card>
 
       <div className="detail-grid">
         <Card>
@@ -150,6 +231,44 @@ export function AdminPlayerDetailPage() {
           )}
         </Card>
       </div>
+
+      <Modal open={pointsModalOpen} title="Modificar puntos" onClose={() => setPointsModalOpen(false)}>
+        <form className="modal-form" onSubmit={submitPoints}>
+          <label>Tipo de ajuste
+            <select value={pointsForm.mode} onChange={(event) => setPointsForm((current) => ({ ...current, mode: event.target.value }))}>
+              <option value="sumar">Sumar puntos</option>
+              <option value="restar">Restar puntos</option>
+            </select>
+          </label>
+          <label>Puntos<input type="number" required min="1" value={pointsForm.points} onChange={(event) => setPointsForm((current) => ({ ...current, points: event.target.value }))} /></label>
+          <label>Motivo obligatorio<textarea required value={pointsForm.reason} onChange={(event) => setPointsForm((current) => ({ ...current, reason: event.target.value }))} /></label>
+          <p className="muted">La posicion del ranking no se edita manualmente: GAME la recalcula por puntos.</p>
+          <div className="wizard-actions">
+            <Button variant="ghost" type="button" onClick={() => setPointsModalOpen(false)}>Cancelar</Button>
+            <Button type="submit">Guardar ajuste</Button>
+          </div>
+        </form>
+      </Modal>
+
+      <ConfirmModal
+        open={confirmAction === "block"}
+        title="Bloquear jugador"
+        message="Estas seguro que queres bloquear a este jugador?"
+        confirmLabel="Si, bloquear"
+        cancelLabel="No"
+        onConfirm={blockPlayer}
+        onCancel={() => setConfirmAction(null)}
+      />
+      <ConfirmModal
+        open={confirmAction === "unblock"}
+        title="Desbloquear jugador"
+        message="Estas seguro que queres desbloquear a este jugador?"
+        confirmLabel="Si, desbloquear"
+        cancelLabel="No"
+        tone="success"
+        onConfirm={unblockPlayer}
+        onCancel={() => setConfirmAction(null)}
+      />
     </div>
   );
 }

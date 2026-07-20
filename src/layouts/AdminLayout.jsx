@@ -1,7 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import {
   Bell,
-  CalendarClock,
   ChevronDown,
   Gauge,
   Medal,
@@ -23,7 +22,6 @@ const adminNav = [
   { to: "/admin/tournaments", label: "Torneos", icon: Trophy },
   { to: "/admin/players", label: "Jugadores", icon: UsersRound },
   { to: "/admin/ranking", label: "Ranking", icon: Medal },
-  { to: "/admin/matches", label: "Partidos", icon: CalendarClock },
   { to: "/admin/discipline", label: "Disciplina", icon: ShieldAlert, badgeKey: "discipline" },
   { to: "/admin/requests", label: "Solicitudes", icon: MessageSquareWarning, badgeKey: "requests" },
   { to: "/admin/notifications", label: "Avisos", icon: Bell, badgeKey: "notifications" },

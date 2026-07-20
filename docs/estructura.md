@@ -1234,3 +1234,39 @@ Ese bye preliminar solo resuelve la imposibilidad matematica de emparejar a todo
 No debe confundirse con los byes o rondas previas posteriores al cierre de preliminares, que se definen segun rendimiento preliminar y las reglas deportivas del formato.
 
 El ranking utilizado para este bye debe ser siempre el ranking correspondiente a la categoria seleccionada. No se debe comparar jugadores de distintas categorias para definir cabezas, byes o desempates deportivos.
+
+## CONFIGURACION ADMINISTRATIVA FINAL
+
+Configuracion debe concentrar solamente parametros globales reales del circuito:
+
+- Categorias.
+- Puntajes.
+- Reglamento.
+
+Tipos de torneo, Disciplina, Notificaciones, Horarios globales y Canchas globales no deben aparecer como configuraciones globales editables duplicadas.
+
+Las categorias creadas por el profesor deben quedar disponibles para registros, altas administrativas de jugadores, inscripciones y creacion de torneos siempre que esten Activas.
+
+La validacion deportiva de categoria debe usar categoryId, rama y nivel jerarquico. El nombre visible no debe utilizarse como criterio de comparacion deportiva.
+
+## RANKING Y AJUSTE DE PUNTOS
+
+La posicion de ranking nunca se edita manualmente.
+
+El profesor puede ajustar puntos sumando o restando, siempre con motivo obligatorio. Luego GAME recalcula automaticamente las posiciones segun puntos dentro de la categoria correspondiente y registra movimiento/auditoria.
+
+Los jugadores con 0 puntos no aparecen en el Ranking Global activo.
+
+## PERFIL, BLOQUEO, BENEFICIO Y REGLAMENTO
+
+El jugador puede editar datos personales permitidos y foto en MOCK, pero no puede editar su categoria desde Perfil.
+
+El descenso se gestiona por Solicitudes. Al aprobar una solicitud, GAME actualiza automaticamente categoryId y categoryName, registra categoria anterior, nueva categoria, fecha, motivo e historial.
+
+El bloqueo manual o automatico por 3 faltas confirmadas cambia el estado del jugador a Bloqueado, impide nuevas inscripciones y conserva historial. El desbloqueo manual no borra faltas.
+
+El detalle administrativo del jugador puede guardar un beneficio individual como porcentaje de descuento y duracion definida o indefinida. El porcentaje representa descuento sobre el valor de inscripcion.
+
+El Reglamento debe tener CRUD desde Configuracion y el jugador debe poder consultar el reglamento vigente. Si no existe reglamento publicado, GAME muestra un estado vacio explicito.
+
+Partidos no debe aparecer como modulo global visible en Admin ni Player. Los partidos se consultan y administran dentro de cada torneo y categoria, manteniendo rutas internas cuando sean necesarias para abrir detalles.

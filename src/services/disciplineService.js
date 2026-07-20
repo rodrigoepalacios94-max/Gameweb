@@ -21,6 +21,7 @@ export const disciplineService = {
   },
   async confirmClaim(id, actor = "admin-1") {
     return mockRequest(async () => {
+      let autoBlockedPlayer = null;
       const claim = mutateMockData((db) => {
         const target = db.disciplineClaims.find((item) => item.id === id);
         if (!target) return null;
@@ -31,6 +32,7 @@ export const disciplineService = {
           if (player.discipline.faults >= FAULT_LIMIT) {
             player.discipline.status = "Bloqueado";
             player.status = "Bloqueado por faltas";
+            autoBlockedPlayer = player;
           }
           db.disciplineFaults.push({
             id: `fault-${Date.now()}`,
@@ -48,6 +50,15 @@ export const disciplineService = {
         description: "Reclamo confirmado en mock.",
         actor,
       });
+      if (autoBlockedPlayer) {
+        await auditService.record({
+          action: "auto_block_player",
+          entityType: "player",
+          entityId: autoBlockedPlayer.id,
+          description: "Jugador bloqueado automaticamente al alcanzar 3 faltas confirmadas.",
+          actor,
+        });
+      }
       return claim;
     }, "No pudimos confirmar el reclamo.");
   },

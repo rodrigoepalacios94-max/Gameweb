@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { Bell, CalendarCheck, ChevronDown, Home, Medal, Trophy, UserRound } from "lucide-react";
+import { Bell, ChevronDown, Home, Medal, Trophy, UserRound } from "lucide-react";
 import { Avatar } from "../components/common/Avatar";
 import { RoleSwitcher } from "../components/layout/RoleSwitcher";
 import { useAuth } from "../context/AuthContext";
@@ -11,7 +11,6 @@ const playerNav = [
   { to: "/player", label: "Inicio", icon: Home, end: true },
   { to: "/player/tournaments", label: "Torneos", icon: Trophy },
   { to: "/player/ranking", label: "Ranking", icon: Medal },
-  { to: "/player/matches", label: "Partidos", icon: CalendarCheck },
   { to: "/player/notifications", label: "Avisos", icon: Bell },
   { to: "/player/profile", label: "Perfil", icon: UserRound },
 ];

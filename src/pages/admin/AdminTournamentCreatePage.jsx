@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CalendarDays, CheckCircle2, Clock, Send, Trash2, Trophy, UsersRound, X } from "lucide-react";
 import { Badge } from "../../components/common/Badge";
@@ -9,6 +9,7 @@ import { LoadingState } from "../../components/common/LoadingState";
 import { Tabs } from "../../components/common/Tabs";
 import { useAsyncData } from "../../hooks/useAsyncData";
 import { categoryService } from "../../services/categoryService";
+import { adminService } from "../../services/adminService";
 import { tournamentService } from "../../services/tournamentService";
 import { formatDate } from "../../utils/formatters";
 import { DEFAULT_MATCH_FORMAT, describeMatchFormat } from "../../utils/matchFormat";
@@ -17,6 +18,7 @@ const steps = [
   { id: "general", label: "General" },
   { id: "categories", label: "Categorias" },
   { id: "match", label: "Partido" },
+  { id: "scoring", label: "Puntaje" },
   { id: "schedule", label: "Horarios" },
   { id: "publish", label: "Publicar" },
 ];
@@ -30,7 +32,8 @@ const initialForm = {
   semifinalsDate: "2026-08-15",
   finalsDate: "2026-08-16",
   price: 18000,
-  scoringSystem: "GAME 1000",
+  scoringSystemId: "",
+  scoringSystem: "",
   type: "Formato pendiente",
   matchFormat: DEFAULT_MATCH_FORMAT,
 };
@@ -53,8 +56,11 @@ export function AdminTournamentCreatePage() {
   const [formError, setFormError] = useState("");
   const [publishing, setPublishing] = useState(false);
   const { data, loading, error, reload } = useAsyncData(async () => {
-    const categories = await categoryService.getCategories();
-    return { categories };
+    const [categories, settings] = await Promise.all([
+      categoryService.getCategories(),
+      adminService.getSettings(),
+    ]);
+    return { categories, settings };
   }, []);
 
   const isDirty = useMemo(() => {
@@ -67,17 +73,29 @@ export function AdminTournamentCreatePage() {
     );
   }, [form, selectedCategories, schedule]);
 
-  if (loading) return <LoadingState message="Cargando asistente..." />;
-  if (error) return <ErrorState title="No pudimos cargar el asistente." onRetry={reload} />;
-
-  const { categories } = data;
+  const categories = data?.categories || [];
+  const settings = data?.settings || { scoringSystems: [] };
   const activeCategories = categories.filter((category) => category.status === "Activa");
+  const activeScoringSystems = settings.scoringSystems.filter((system) => system.status === "Activo");
   const activeCategoryIds = activeCategories.map((category) => category.id);
   const saturdayError = hasDuplicatedTimes(schedule.saturday);
   const sundayError = hasDuplicatedTimes(schedule.sunday);
   const selectedCategoryNames = categories
     .filter((category) => selectedCategories.includes(category.id))
     .map((category) => `${category.name} ${category.branch}`);
+
+  useEffect(() => {
+    if (!form.scoringSystemId && activeScoringSystems[0]) {
+      setForm((current) => ({
+        ...current,
+        scoringSystemId: activeScoringSystems[0].id,
+        scoringSystem: activeScoringSystems[0].name,
+      }));
+    }
+  }, [activeScoringSystems, form.scoringSystemId]);
+
+  if (loading) return <LoadingState message="Cargando asistente..." />;
+  if (error) return <ErrorState title="No pudimos cargar el asistente." onRetry={reload} />;
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -145,6 +163,11 @@ export function AdminTournamentCreatePage() {
       setActiveStep("categories");
       return;
     }
+    if (!form.scoringSystemId) {
+      setFormError("Selecciona un sistema de puntaje activo.");
+      setActiveStep("scoring");
+      return;
+    }
     if (saturdayError || sundayError) {
       setFormError("Elimina horarios duplicados antes de publicar.");
       setActiveStep("schedule");
@@ -171,8 +194,11 @@ export function AdminTournamentCreatePage() {
     }
 
     setPublishing(true);
+    const selectedScoringSystem = activeScoringSystems.find((system) => system.id === form.scoringSystemId);
     const tournament = await tournamentService.createTournament({
       ...form,
+      scoringSystemId: selectedScoringSystem?.id || form.scoringSystemId,
+      scoringSystem: selectedScoringSystem?.name || form.scoringSystem,
       description: form.description || "Torneo creado desde el asistente admin.",
       status: "Inscripciones abiertas",
       price: Number(form.price),
@@ -277,6 +303,32 @@ export function AdminTournamentCreatePage() {
           </div>
         ) : null}
 
+        {activeStep === "scoring" ? (
+          <div className="page-stack compact">
+            <div className="section-title">
+              <span>Sistema de puntaje</span>
+              <Badge tone="info">Se guarda por id</Badge>
+            </div>
+            {activeScoringSystems.length ? (
+              <div className="category-pick-list">
+                {activeScoringSystems.map((system) => (
+                  <button
+                    key={system.id}
+                    className={form.scoringSystemId === system.id ? "category-pick-row is-selected" : "category-pick-row"}
+                    type="button"
+                    onClick={() => setForm((current) => ({ ...current, scoringSystemId: system.id, scoringSystem: system.name }))}
+                  >
+                    <strong>{system.name}</strong>
+                    <span>Inscripcion {system.inscription} / Campeon {system.champion} / Subcampeon {system.runnerUp}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">No hay sistemas de puntaje activos.</p>
+            )}
+          </div>
+        ) : null}
+
         {activeStep === "schedule" ? (
           <div className="schedule-form-grid">
             <ScheduleColumn
@@ -316,6 +368,10 @@ export function AdminTournamentCreatePage() {
               <span>Games por set: {form.matchFormat.gamesPerSet}</span>
               <span>Super Tie-Break: {form.matchFormat.useSuperTiebreak ? "Si" : "No"}</span>
               {form.matchFormat.useSuperTiebreak ? <span>Set decisivo: {form.matchFormat.superTiebreakInDecidingSet ? "Super Tie-Break" : "Set normal"}</span> : null}
+            </SummarySection>
+            <SummarySection title="Sistema de puntaje" icon={Trophy}>
+              <span>{activeScoringSystems.find((system) => system.id === form.scoringSystemId)?.name || "Sin sistema seleccionado"}</span>
+              <span>ID: {form.scoringSystemId || "No definido"}</span>
             </SummarySection>
             <SummarySection title="Categorias" icon={UsersRound}>
               {selectedCategoryNames.length ? selectedCategoryNames.map((name) => <span key={name}>{name}</span>) : <span>Sin categorias seleccionadas</span>}

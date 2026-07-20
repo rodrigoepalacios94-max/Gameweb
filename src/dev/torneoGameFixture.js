@@ -440,6 +440,7 @@ export function createTorneoGameFixture(overrides = {}) {
     finalsDate: "2026-08-16",
     status: "En juego",
     type: "Formato por categoria",
+    scoringSystemId: "score-game-1000",
     scoringSystem: "GAME 1000",
     matchFormat: DEFAULT_MATCH_FORMAT,
     price: 0,

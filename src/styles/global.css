@@ -350,6 +350,13 @@ img {
   grid-template-columns: auto 1fr;
 }
 
+.profile-header--danger {
+  border-color: rgba(255, 92, 108, 0.68);
+  background:
+    linear-gradient(110deg, rgba(255, 92, 108, 0.11), rgba(255, 255, 255, 0) 50%),
+    var(--color-surface);
+}
+
 .hero-copy {
   position: relative;
   z-index: 2;
@@ -864,7 +871,7 @@ img {
   left: var(--space-3);
   z-index: 30;
   display: grid;
-  grid-template-columns: repeat(6, minmax(46px, 1fr));
+  grid-template-columns: repeat(5, minmax(46px, 1fr));
   gap: 2px;
   padding: var(--space-2);
   overflow-x: auto;
@@ -876,7 +883,7 @@ img {
 }
 
 .admin-mobile-nav {
-  grid-template-columns: repeat(10, minmax(54px, 1fr));
+  grid-template-columns: repeat(8, minmax(54px, 1fr));
 }
 
 .bottom-nav a {
@@ -1803,6 +1810,11 @@ img {
   background: rgba(255, 255, 255, 0.052);
 }
 
+.admin-table-row.is-danger {
+  border-color: rgba(255, 92, 108, 0.45);
+  background: rgba(255, 92, 108, 0.08);
+}
+
 .admin-table-row--players {
   grid-template-columns: minmax(230px, 1.65fr) minmax(130px, 0.85fr) 72px 92px 72px minmax(150px, 0.85fr) 82px;
 }
@@ -1833,6 +1845,28 @@ img {
 
 .admin-table-row--ranking {
   grid-template-columns: 50px auto minmax(150px, 1.2fr) minmax(120px, 0.9fr) 90px auto;
+}
+
+.ranking-podium {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ranking-podium-card {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: center;
+  text-align: center;
+}
+
+.ranking-podium-card strong,
+.ranking-podium-card b {
+  color: var(--color-green);
+}
+
+.ranking-podium-card--1 {
+  border-color: rgba(207, 219, 47, 0.62);
 }
 
 .admin-table-row--scoring {
@@ -1961,6 +1995,43 @@ img {
   color: var(--color-muted);
   font-size: 0.86rem;
   font-weight: 800;
+}
+
+.modal-form,
+.benefit-grid,
+.regulation-preview,
+.confirm-modal {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.benefit-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: end;
+}
+
+.benefit-grid label,
+.modal-form label {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--color-muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.confirm-modal svg {
+  color: var(--color-orange);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+  white-space: nowrap;
 }
 
 .search-input {
@@ -2847,6 +2918,7 @@ button.preliminary-card--compact:hover {
   .tournament-grid,
   .match-grid,
   .profile-stat-grid,
+  .ranking-podium,
   .podium-grid {
     grid-template-columns: 1fr;
   }

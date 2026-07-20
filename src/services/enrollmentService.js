@@ -12,14 +12,37 @@ export const enrollmentService = {
   async enrollPlayer(payload) {
     return mockRequest(() =>
       mutateMockData((db) => {
+        const player = db.players.find((item) => item.id === payload.playerId);
+        if (player?.status?.includes("Bloqueado")) {
+          throw new Error("Tu cuenta esta bloqueada y no podes inscribirte a torneos.");
+        }
+        const tournament = db.tournaments.find((item) => item.id === payload.tournamentId);
+        const category = db.categories.find((item) => item.id === payload.categoryId);
+        const alreadyRegistered = db.enrollments.some(
+          (enrollment) =>
+            enrollment.tournamentId === payload.tournamentId &&
+            enrollment.playerId === payload.playerId &&
+            enrollment.categoryId === payload.categoryId &&
+            enrollment.status !== "Rechazada",
+        );
+        if (alreadyRegistered) return db.enrollments.find((enrollment) => enrollment.tournamentId === payload.tournamentId && enrollment.playerId === payload.playerId && enrollment.categoryId === payload.categoryId);
         const enrollment = {
           id: createMockId("reg"),
           status: "Pendiente de pago",
           payment: "Pendiente",
           date: new Date().toISOString().slice(0, 10),
+          categoryName: category ? `${category.name} ${category.branch}` : payload.categoryName,
           ...payload,
         };
         db.enrollments.push(enrollment);
+        if (tournament) {
+          tournament.participants = [...new Set([...(tournament.participants || []), payload.playerId])];
+          const stage = tournament.categoryStages?.find((item) => item.categoryId === payload.categoryId);
+          if (stage) {
+            stage.participants = [...new Set([...(stage.participants || []), payload.playerId])];
+            stage.inscriptionsCount = stage.participants.length;
+          }
+        }
         return enrollment;
       }), "No pudimos inscribir al jugador.");
   },

@@ -32,5 +32,5 @@ export function getBlockedLowerCategories(playerCategory, categories = []) {
 
 export function getSameOrAllowedCategories(playerCategory, categories = []) {
   if (!playerCategory) return [];
-  return categories.filter((category) => canPlayerRegisterInCategory(playerCategory, category));
+  return categories.filter((category) => category.status === "Activa" && canPlayerRegisterInCategory(playerCategory, category));
 }
