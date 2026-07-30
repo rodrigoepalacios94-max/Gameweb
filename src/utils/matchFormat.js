@@ -1,5 +1,5 @@
 export const DEFAULT_MATCH_FORMAT = {
-  bestOfSets: 3,
+  bestOfSets: 2,
   gamesPerSet: 6,
   useSuperTiebreak: true,
   superTiebreakInDecidingSet: true,
@@ -14,6 +14,7 @@ export const MATCH_FORMAT_OPTIONS = {
     { value: 5, label: "Al mejor de 5 sets" },
   ],
   gamesPerSet: [
+    { value: 2, label: "2 games" },
     { value: 4, label: "4 games" },
     { value: 6, label: "6 games" },
   ],

@@ -3,7 +3,7 @@ import { createTorneoGameFixture, getTorneoGameDiagnostics, TORNEO_GAME_ID } fro
 
 export function isTestTournamentName(name = "") {
   const normalized = name.trim().toLowerCase();
-  return normalized === "prueba" || normalized === "torneo game";
+  return normalized === "prueba" || normalized === "torneo game" || normalized === "torneo de pruebas - preliminares";
 }
 
 function replaceSportsFixture(db, payload = {}) {
@@ -12,10 +12,12 @@ function replaceSportsFixture(db, payload = {}) {
     name: payload.name?.trim() || "Torneo GAME",
   });
   db.players = fixture.players;
+  db.categories = fixture.categories;
   db.tournaments = fixture.tournaments;
   db.brackets = fixture.brackets;
   db.matches = fixture.matches;
   db.rankings = fixture.rankings;
+  db.previousSeasonRankings = fixture.previousSeasonRankings || [];
   db.rankingMovements = fixture.rankingMovements;
   db.enrollments = fixture.enrollments;
   db.schedule = fixture.schedule;

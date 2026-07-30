@@ -17,28 +17,6 @@ GAME deberá permitir:
 •	Centralizar toda la información del circuito. 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 2 – Arquitectura generasl
 2.1 Tipos de usuario
 El sistema contará inicialmente con dos perfiles.
@@ -66,21 +44,16 @@ El sistema estará dividido en módulos independientes.
 •	Notificaciones 
 ________________________________________
 2.3 Principios de diseño
-Toda acción automática podrá editarse manualmente.
+
+Las acciones automáticas podrán ser modificadas manualmente únicamente cuando la funcionalidad correspondiente lo permita y sin violar las reglas deportivas obligatorias definidas por el sistema.
+
+Las reglas estructurales de los formatos de torneo deberán respetar siempre lo establecido en:
+
+docs/formatos.md
+
 Nunca existirán procesos irreversibles sin confirmación.
-Toda modificación importante quedará registrada en un historial.
 
-
-
-
-
-
-
-
-
-
-
-
+Toda modificación importante deberá quedar registrada en un historial de auditoría.
 
 
 3 – Jugadores
@@ -156,27 +129,6 @@ Un jugador podrá encontrarse en alguno de los siguientes estados:
 •	Bloqueado por faltas.
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 4 – Administrador
 El profesor tendrá acceso completo al sistema.
 Podrá administrar todos los módulos.
@@ -191,12 +143,18 @@ Notificaciones.
 Estado del ranking
 
 4.2 Gestión de jugadores
+
 El profesor podrá:
-Cambiar categoría.
-Modificar ranking.
-Bloquear jugadores.
-Desbloquear jugadores.
-Consultar historial.
+
+- Cambiar categoría.
+- Ajustar puntos del ranking con motivo obligatorio.
+- Bloquear jugadores.
+- Desbloquear jugadores.
+- Consultar historial.
+
+La posición del ranking no podrá modificarse manualmente.
+
+Cuando el profesor realice un ajuste de puntos, GAME deberá recalcular automáticamente la posición correspondiente del jugador.
 
 4.3 Gestión de torneos
 Crear.
@@ -270,13 +228,6 @@ El cambio quedará registrado indicando:
 •	Fecha. 
 •	Motivo (opcional).
 
-5.2 Tipos de torneo
-El sistema contemplará inicialmente tres formatos.
-•	Preliminar. 
-•	Zonas. 
-•	Eliminación Directa. 
-•	
-Cada formato utilizará un algoritmo distinto para generar las llaves.
 
 5.3 Sistema de puntajes
 El profesor podrá configurar distintos tipos de puntuación.
@@ -315,19 +266,6 @@ Configuración de:
 •	Avisos internos del sistema.
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 6. Torneos
 6.1 Concepto de Torneo
 Un torneo representa una competencia organizada por GAME, donde participan una o varias categorías bajo un formato determinado.
@@ -341,7 +279,6 @@ Cada torneo tendrá como mínimo los siguientes datos:
 •	Fecha del Día de Finales. 
 •	Fecha prevista para semifinales. 
 •	Estado. 
-•	Tipo de torneo. 
 •	Sistema de puntaje. 
 •	Valor de inscripción. 
 •	Categorías participantes. 
@@ -364,26 +301,44 @@ Mientras las inscripciones estén abiertas se podrán agregar jugadores.
 Una vez cerradas ya no será posible inscribirse salvo autorización manual del profesor.
 
 6.4 Creación
+
 El profesor deberá completar un asistente de creación.
+
 Paso 1
 Información general.
+
 Paso 2
 Seleccionar categorías.
+
 Paso 3
+Seleccionar el formato de torneo para cada categoría:
+
+- Preliminares.
+- Zonas.
+- Eliminación Directa.
+
+Las reglas deportivas y estructuras correspondientes a cada formato se encuentran definidas en:
+
+docs/formatos.md
+
+GAME debe utilizar dicho archivo como fuente oficial para determinar la estructura correspondiente según el formato seleccionado y la cantidad de jugadores.
+
+Paso 4
 Configurar formato del partido:
+
 - Cantidad de sets.
 - Games por set.
 - Uso de Super Tie-Break.
-Paso 4
-Seleccionar sistema de puntaje.
 
 Paso 5
-Definir canchas y horarios.
+Seleccionar sistema de puntaje.
+
 Paso 6
+Definir canchas y horarios.
+
+Paso 7
 Publicar torneo.
 
-El formato competitivo de cada categoria no se selecciona durante la creacion inicial.
-Preliminar, Zonas y Eliminacion Directa se definen por categoria despues del cierre de inscripciones, cuando GAME conoce la cantidad real de jugadores inscriptos en cada categoria.
 
 6.5 Edición
 Mientras el torneo no haya comenzado podrán modificarse todos los datos.
@@ -400,26 +355,6 @@ Nunca podrán modificarse las categorías una vez iniciado.
 Un torneo podrá cancelarse antes o durante su desarrollo.
 El sistema conservará toda la información histórica.
 Nunca eliminará datos.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 7. Inscripciones
@@ -465,18 +400,88 @@ El sistema registrará el motivo.
 El ranking refleja el rendimiento deportivo de cada jugador dentro del circuito GAME.
 
 8.2 Tipos de ranking
-El sistema administrará tres rankings diferentes.
-Ranking General
-Se utiliza para:
-•	Cabezas de serie. 
-•	Desempates. 
 
-Ranking por Categoría
-Muestra la clasificación únicamente dentro de cada categoría.
-Ranking Histórico
-Conserva todos los puntos obtenidos desde el inicio del sistema.
-El profesor podrá editar estos puntos en caso de que el jugador posea puntos a la hora de la entrega de este proyecto.
-Nunca elimina información.
+El sistema administrará rankings generales del circuito y, cuando corresponda, rankings temporales asociados a una competencia.
+
+### Ranking General
+
+Representa el ranking activo correspondiente al año deportivo vigente.
+
+Se utiliza para:
+
+- Cabezas de serie.
+- Desempates.
+- BYE por Ranking General cuando docs/formatos.md lo establezca expresamente.
+- Otras condiciones expresamente establecidas en las reglas del sistema.
+
+Los jugadores comienzan cada nuevo año deportivo con 0 puntos.
+
+Los jugadores con 0 puntos no aparecen inicialmente en el Ranking General activo y comienzan a incorporarse a medida que obtienen puntos durante el año.
+
+### Inicio de una nueva temporada
+
+Al comenzar un nuevo año deportivo, todos los jugadores iniciarán el Ranking General de la temporada vigente con 0 puntos.
+
+Sin embargo, mientras no se haya disputado el primer torneo oficial del año en una categoría, GAME utilizará el Ranking General de la temporada anterior para todas las reglas que dependan del orden deportivo de los jugadores.
+
+Esto incluye, entre otras:
+
+- Determinación de cabezas de serie.
+- Asignación de BYE.
+- Sorteos que utilicen el Ranking General.
+- Cualquier otra regla definida en docs/formatos.md que requiera utilizar el Ranking General.
+
+Una vez finalizado el primer torneo oficial de la temporada en esa categoría, GAME dejará de utilizar el Ranking General de la temporada anterior y utilizará exclusivamente el Ranking General de la temporada vigente.
+
+### Jugadores promovidos de categoría
+
+Cuando un jugador ascienda de categoría para una nueva temporada, comenzará con 0 puntos en el Ranking General de su nueva categoría.
+
+Si dicho jugador no posee historial en esa categoría durante la temporada anterior, GAME lo considerará con 0 puntos también para las reglas que utilicen el Ranking General de la temporada anterior.
+
+En consecuencia, no tendrá prioridad sobre los jugadores que sí posean puntos en esa categoría y participará en la asignación de cabezas de serie, BYE y demás reglas deportivas según la posición que le corresponda con ese puntaje.
+
+### Ranking por Categoría
+
+Muestra la clasificación de los jugadores correspondiente a cada categoría.
+
+La clasificación se determina según los puntos obtenidos por los jugadores y las reglas de categoría establecidas por GAME.
+
+### Ranking Histórico
+
+Conserva la información correspondiente a rankings y puntos de temporadas anteriores.
+
+La información histórica no debe eliminarse cuando comienza un nuevo año deportivo.
+
+El profesor podrá realizar ajustes de puntos cuando corresponda, siempre respetando las reglas de auditoría y registrando el motivo.
+
+### Ranking de Preliminares
+
+Cuando una categoría utiliza el formato Preliminares, GAME debe generar un Ranking de Preliminares correspondiente exclusivamente a esa categoría y a ese torneo.
+
+Este ranking es temporal y competitivo dentro del torneo.
+
+No forma parte del Ranking General anual ni del Ranking Histórico general.
+
+Se utiliza para ordenar el rendimiento obtenido en preliminares y resolver las condiciones establecidas en:
+
+docs/formatos.md
+
+Entre ellas:
+
+- Mejores ganadores.
+- Peores ganadores.
+- Mejores perdedores.
+- Peores perdedores.
+- Clasificaciones directas.
+- BYE determinados por rendimiento de preliminares.
+- Participación en rondas adicionales.
+
+El Ranking de Preliminares y el Ranking General deben mantenerse siempre separados.
+
+Cuando docs/formatos.md indique expresamente que una decisión debe tomarse utilizando el Ranking General, GAME no podrá utilizar el Ranking de Preliminares.
+
+Cuando docs/formatos.md indique expresamente que una decisión debe tomarse utilizando el Ranking de Preliminares, GAME no podrá utilizar el Ranking General.
 
 8.3 Obtención de puntos
 Los puntos se obtendrán según la tabla configurada para cada torneo.
@@ -507,6 +512,7 @@ El profesor podrá agregar, descontar o modificar puntos, siempre indicando el m
 8.6 Actualización
 El ranking se actualizará automáticamente cada vez que finalice un partido.
 No será necesario recalcular manualmente.
+
 9. Sistema de puntajes
 9.1 Configuración
 Cada tipo de torneo tendrá su propia tabla.
@@ -544,147 +550,6 @@ Todo movimiento quedará registrado.
 Nunca se perderá información.
 
 
-
-
-
-
-
-
-10. Formatos de torneo
-GAME contará inicialmente con tres formatos.
-
-10.1 Zonas
-Todos contra todos.
-Luego eliminación directa.
-El profesor define:
-•	Cantidad de zonas. 
-•	Cantidad de jugadores. 
-•	Clasificados por zona. 
-
-Empates:
-1.	Partidos ganados. 
-2.	Sets. 
-3.	Games. 
-4.	Ranking General. 
-5.	Partido desempate. 
-
-10.2 Preliminar
-Todos los jugadores disputan un partido preliminar.
-La preliminar tiene tres objetivos:
-•	Sumar puntos. 
-•	Generar ranking interno del torneo. 
-•	Definir el cuadro principal. 
-Los jugadores se separan en:
-Ganadores.
-Perdedores.
-
-Cada grupo se ordena según:
-1.	Resultado. 
-2.	Sets. 
-3.	Games. 
-4.	Ranking General. 
-5.	Partido desempate. 
-
-
-Las llaves se generan respetando las reglas definidas:
-•	Sorteo aleatorio. 
-•	Ganadores enfrentan perdedores. 
-•	Los dos mejores cabezas de serie del ranking general siempre quedan en mitades opuestas del cuadro, aunque hayan ganado o perdido la preliminar. 
-•	Los byes se asignan según el rendimiento en la preliminar, nunca por el ranking general. 
-•	Si la cantidad de jugadores no coincide con una llave estándar (8, 16, 32, 64...), el sistema agregará una ronda previa o asignará byes según corresponda. 
-
-10.3 Eliminación Directa
-No existen preliminares.
-El cuadro se genera directamente.
-Si el torneo utiliza ranking:
-Los cabezas de serie se distribuyen automáticamente.
-Si no utiliza ranking:
-Todo el cuadro será sorteado.
-
-10.3.1 Distribución de Cabezas de Serie
-Cuando un torneo de Eliminación Directa utilice el Ranking General como criterio de siembra, el sistema ubicará automáticamente a los mejores jugadores respetando la siguiente distribución:
-
-El sistema distribuirá los cuatro mejores jugadores del Ranking General de la siguiente manera:
-•	Cabeza de Serie N.º 1: parte superior de la llave. 
-•	Cabeza de Serie N.º 2: parte inferior de la llave. 
-•	Cabeza de Serie N.º 3: mitad inferior del lado del Cabeza de Serie N.º 2. 
-•	Cabeza de Serie N.º 4: mitad inferior del lado del Cabeza de Serie N.º 1. 
-
-Con esta distribución:
-•	El Nº1 y el Nº2 únicamente podrán enfrentarse en la final. 
-•	El Nº1 y el Nº4 solo podrán enfrentarse en una semifinal. 
-•	El Nº2 y el Nº3 solo podrán enfrentarse en una semifinal. 
-•	El Nº1 nunca enfrentará al Nº2 antes de la final. 
-•	El Nº3 nunca compartirá la misma mitad que el Nº1. 
-•	El Nº4 nunca compartirá la misma mitad que el Nº2. 
-
-
-Sorteo del resto de los jugadores
-Una vez ubicados los cabezas de serie, el resto de los participantes será distribuido mediante sorteo aleatorio, respetando las reglas particulares del formato de torneo.
-
-
-10.4 Reglas especiales
-Cada formato podrá tener reglas específicas configurables, por ejemplo:
-•	Cantidad de sets por partido. 
-•	Uso de super tie-break. 
-•	Criterios de desempate. 
-•	Cantidad de clasificados por zona. 
-•	Puntaje otorgado por ronda. 
-•	Penalizaciones por W.O. 
-•	Reglas disciplinarias particulares. 
-
-
-
-
-
-
-
-
-
-
-
-11. Armado de llaves
-
-11.1 Armado automático de llaves
-El sistema deberá generar automáticamente las llaves eliminatorias respetando todas las reglas del torneo, minimizando la intervención del profesor.
-El algoritmo deberá adaptarse automáticamente a cualquier cantidad de jugadores.
-
-11.2 Tamaños de llaves
-GAME trabajará con llaves estándar de:
-•	8 jugadores 
-•	16 jugadores 
-•	32 jugadores 
-•	64 jugadores 
-
-El sistema elegirá automáticamente la llave más conveniente según la cantidad de participantes.
-
-11.3 Adaptación automática
-Cuando la cantidad de jugadores no coincida exactamente con una llave estándar, el sistema aplicará una de estas dos soluciones:
-a) Byes, cuando falten jugadores para completar la llave.
-b) Ronda clasificatoria previa, cuando sobren jugadores.
-La elección será completamente automática.
-
-11.4 Sorteo
-Una vez definidos los jugadores clasificados al cuadro principal, el sistema realizará un sorteo aleatorio.
-No existirá un orden preestablecido entre ganadores y perdedores, salvo las reglas especiales definidas para el torneo.
-
-11.5 Reglas obligatorias
-El algoritmo siempre deberá respetar las siguientes reglas:
-•	Los dos mejores jugadores del Ranking General serán cabezas de serie. 
-•	Ambos deberán quedar ubicados en mitades opuestas del cuadro. 
-•	Nunca podrán enfrentarse antes de la final. 
-•	El resto de los cruces será aleatorio. 
-•	Cuando existan restricciones por formato (ganadores vs. perdedores), el algoritmo deberá respetarlas antes de realizar el sorteo. 
-
-11.6 Regeneración
-Mientras no se haya disputado ningún partido, el profesor podrá regenerar la llave completa.
-Cada regeneración producirá un nuevo sorteo aleatorio.
-Una vez iniciado el torneo, la regeneración quedará bloqueada.
-
-
-
-
-
 12. Programación inteligente
 12.1 Objetivo
 El sistema deberá distribuir automáticamente todos los partidos del torneo considerando las reglas deportivas y la disponibilidad de infraestructura.
@@ -712,7 +577,7 @@ El algoritmo tendrá en cuenta:
 La prioridad del algoritmo será:
 1.	Todas las finales deben disputarse el mismo día. 
 2.	Las semifinales deben jugarse lo más cerca posible de las finales. 
-3.	Si una categoría debe esperar, se retrasarán las rondas anteriores (preliminares, octavos, cuartos) y no las instancias decisivas. 
+3.  Si una categoría debe esperar, se retrasarán prioritariamente las instancias anteriores de la competencia y no las instancias decisivas, respetando siempre la estructura específica de la categoría y su formato.
 4.	Evitar que un jugador dispute dos partidos al mismo horario. 
 5.	Evitar que un jugador tenga tiempos de espera excesivos entre partidos de una misma jornada. 
 
@@ -774,8 +639,6 @@ El sistema actualizará automáticamente la llave y asignará los puntos según 
 13.5 Edición
 Los resultados podrán corregirse únicamente por el profesor.
 Toda modificación quedará registrada en un historial de auditoría.
-
-
 
 
 14. Sistema disciplinario
@@ -853,21 +716,6 @@ Las notificaciones podrán enviarse mediante:
 .
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 16. Reglas
 Las siguientes reglas son obligatorias para el funcionamiento del sistema.
 
@@ -884,35 +732,81 @@ El sistema generará una solicitud.
 Hasta que el profesor no la apruebe:
 La inscripción permanecerá bloqueada.
 
-16.3 Ranking
-El Ranking General solamente será utilizado para:
-•	Determinar cabezas de serie. 
-•	Resolver empates cuando todos los demás criterios sean iguales. 
-Nunca otorgará byes.
-Nunca modificará el orden obtenido en las preliminares.
+16.3 Ranking General y formatos
 
-16.4 Byes
-Los byes siempre serán asignados utilizando el Ranking de las Preliminares.
-Nunca utilizando el Ranking General.
+El Ranking General podrá utilizarse para:
+
+• Determinar cabezas de serie.
+• Distribuir a los principales cabezas de serie dentro de la llave.
+• Resolver los BYE por Ranking General cuando la regla específica del formato y cantidad de jugadores así lo indique.
+• Resolver otros casos expresamente establecidos en docs/formatos.md.
+
+El Ranking General nunca debe confundirse con el Ranking de Preliminares.
+
+Las reglas específicas que determinan cuándo corresponde utilizar Ranking General o Ranking de Preliminares se encuentran definidas en:
+
+docs/formatos.md
+
+GAME no debe otorgar, eliminar ni modificar BYE basándose en reglas generales diferentes a las establecidas en dicho archivo.
+
+
+16.4 BYE
+
+Los BYE deben asignarse exclusivamente según las reglas específicas establecidas en:
+
+docs/formatos.md
+
+Dependiendo del formato y de la cantidad de jugadores, un BYE podrá determinarse mediante:
+
+• Ranking General.
+• Ranking de Preliminares.
+• Otra condición expresamente establecida en las reglas específicas del formato.
+
+GAME no debe asumir que todos los BYE corresponden al Ranking General ni que todos corresponden al Ranking de Preliminares.
+
+Cuando docs/formatos.md indique expresamente "BYE por Ranking General", deberá utilizarse el Ranking General.
+
+Cuando docs/formatos.md indique expresamente un BYE determinado por rendimiento o Ranking de Preliminares, deberá utilizarse exclusivamente el Ranking de Preliminares.
+
+Todo BYE debe respetar además las reglas administrativas y deportivas definidas en docs/formatos.md.
+
 
 16.5 Cabezas de serie
-Los dos mejores jugadores del Ranking General serán considerados cabezas de serie.
-El sistema deberá ubicarlos obligatoriamente en mitades opuestas del cuadro.
-Esto deberá cumplirse independientemente del resultado obtenido en las preliminares.
+
+Los cabezas de serie se determinan utilizando el Ranking General de la categoría.
+
+Durante el sorteo de preliminares, los cabezas de serie no pueden enfrentarse entre sí.
+
+Al generar posteriormente una llave eliminatoria, los principales cabezas de serie deben distribuirse en lados opuestos de la llave siempre que sea matemáticamente posible.
+
+La condición de cabeza de serie se mantiene independientemente del resultado obtenido en preliminares.
+
+Por lo tanto, un cabeza de serie que pierda su preliminar continúa siendo cabeza de serie mientras permanezca en competencia, pero también conserva su condición de Perdedor de Preliminar para la aplicación de las reglas de armado de la llave.
+
+Las reglas completas de protección, distribución y excepciones matemáticas se encuentran definidas en:
+
+docs/formatos.md
 
 16.6 Programación
-La prioridad del sistema será siempre:
-1.	Finales. 
-2.	Semifinales. 
-3.	Cuartos. 
-4.	Octavos. 
-5.	Preliminares. 
-Nunca deberá dejar una semifinal demasiado alejada de la final.
+
+La prioridad del sistema será siempre preservar las instancias decisivas del torneo.
+
+Orden general de prioridad:
+
+1. Final.
+2. Semifinales.
+3. Cuartos de final.
+4. 8vos.
+5. 16avos.
+6. 32avos.
+7. Preliminares.
+
+Solo deben considerarse las instancias que efectivamente existan según el formato y la cantidad de jugadores definidos en docs/formatos.md.
+
+Nunca deberá dejarse una semifinal excesivamente alejada de la final cuando exista una alternativa válida de programación.
 
 
-Sí, entonces cambia bastante la definición del **ranking anual** y del **ascenso**. Te lo dejo completo de nuevo, listo para agregar a `docs/estructura.md`:
 
-```markdown
 ## REGLAS DE W.O. Y CÓMPUTO DE RESULTADOS
 
 Cuando un partido se define por W.O. (Walkover), el resultado debe computarse automáticamente como un resultado deportivo de 6-0 / 6-0.
@@ -1078,9 +972,6 @@ Después de procesar los ascensos:
 3. Se inicia el nuevo Ranking Global con todos los jugadores en 0 puntos.
 4. El Ranking Global visible comienza vacío.
 5. Los jugadores se incorporan nuevamente al ranking a medida que obtienen puntos durante el nuevo año.
-```
-
-Así queda definido algo importante: **el ranking no se borra históricamente**, sino que se cierra el ranking de 2026, por ejemplo, y el **ranking activo 2027 arranca vacío**. Eso después nos permite tener historial de campeones y posiciones anuales sin mezclar los puntos entre temporadas.
 
 ## CELEBRACIÓN DE ASCENSO DE CATEGORÍA
 
@@ -1110,96 +1001,6 @@ Una vez que el jugador confirme o cierre la celebración, el sistema deberá reg
 
 El ascenso ya debe haber sido aplicado previamente a la categoría vigente del jugador. La pantalla tiene una función exclusivamente informativa y de celebración, y no requiere aceptación por parte del jugador.
 
-## FORMATOS POR CATEGORIA DESPUES DEL CIERRE DE INSCRIPCIONES
-
-El formato deportivo definitivo se define por categoria y no como una unica regla global del torneo.
-
-El flujo correcto es:
-
-1. Crear torneo.
-2. Seleccionar categorias participantes.
-3. Abrir inscripciones.
-4. Recibir inscripciones.
-5. Cerrar inscripciones.
-6. Contar participantes reales por categoria.
-7. GAME propone un formato por categoria.
-8. El profesor confirma o cambia manualmente cada formato.
-9. Recien despues de confirmar el formato se genera la estructura deportiva de esa categoria.
-
-GAME puede sugerir:
-
-- Eliminacion Directa para cantidades que encajan bien en una llave limpia o requieren pocos byes.
-- Zonas para cantidades que no encajan comodamente en una llave y conviene distribuir en grupos.
-- Preliminar para categorias numerosas donde el esquema preliminar de GAME resulta conveniente.
-
-La sugerencia no es obligatoria.
-El profesor siempre conserva la decision final y puede cambiar cualquier formato sugerido antes de confirmarlo.
-
-Estados posibles por categoria:
-
-- Formato pendiente.
-- Formato sugerido.
-- Formato confirmado.
-- Sin inscriptos.
-
-No debe generarse una llave, preliminar o zona definitiva para una categoria hasta que el formato de esa categoria este confirmado.
-Una categoria sin inscriptos no genera formato ni estructura deportiva.
-
-## REGLAS DE GENERACION POR FORMATO
-
-Cada categoria genera una estructura independiente segun su formato y su cantidad real de participantes.
-No debe reutilizarse una misma llave para Preliminar, Zonas y Eliminacion Directa.
-
-### Eliminacion Directa
-
-Eliminacion Directa no utiliza preliminares.
-Si la cantidad entra exactamente en un cuadro base, se genera directamente ese cuadro.
-
-Ejemplos:
-
-- 16 jugadores: 8 partidos de 16avos, 4 cuartos, 2 semifinales y 1 final.
-- 32 jugadores: 16 partidos de 16avos, 8 octavos, 4 cuartos, 2 semifinales y 1 final.
-
-Si sobran jugadores respecto del cuadro base inmediato, GAME genera una ronda previa para completar el cuadro sin crear byes masivos.
-Ejemplo con 34 jugadores:
-
-- 4 jugadores disputan 2 partidos de 32avos.
-- Los 2 ganadores completan un cuadro principal de 32.
-- Luego se generan 16avos, octavos, cuartos, semifinal y final.
-
-No se debe crear una llave de 64 con 30 byes para resolver 34 jugadores.
-
-### Preliminar
-
-Preliminar tiene una logica propia.
-Todos los jugadores disputan un partido preliminar cuando existe rival disponible.
-Con 34 jugadores se generan 17 partidos preliminares.
-
-Luego se ordenan ganadores y perdedores segun rendimiento preliminar.
-Para el caso oficial de 34 jugadores:
-
-- Clasifican los 17 ganadores.
-- Clasifican directamente los 13 mejores perdedores.
-- Los 4 peores perdedores disputan 2 partidos de 32avos.
-- Los 2 ganadores de 32avos completan el cuadro de 32.
-- En 16avos se generan 16 partidos.
-
-El ranking general solo se usa para cabezas de serie o desempates cuando corresponda.
-No debe reemplazar el orden deportivo obtenido en preliminares.
-
-### Zonas
-
-Zonas utiliza grupos pequenos y equilibrados.
-Las zonas deben tener normalmente 3 o 4 jugadores.
-No se deben generar dos zonas gigantes para cantidades altas o incomodas.
-
-Ejemplos:
-
-- 11 jugadores: distribucion equilibrada de 4, 4 y 3.
-- 23 jugadores: distribucion equilibrada en varias zonas de 3 y 4 jugadores.
-
-Dentro de cada zona todos juegan contra todos.
-La fase eliminatoria posterior se genera despues de conocer los clasificados de cada zona.
 
 ## DETALLE ADMINISTRATIVO DE TORNEO POR CATEGORIA
 
@@ -1217,7 +1018,6 @@ No deben existir pestanas principales permanentes de Formatos, Inscripciones o R
 
 La informacion de resumen del torneo debe vivir en el encabezado y en la configuracion administrativa del torneo.
 
-La configuracion de formatos por categoria se realiza desde la accion Ajustes del encabezado. Al cerrar inscripciones, GAME cuenta los participantes por categoria, propone o permite seleccionar el formato correspondiente y luego confirma/genera los cuadros por categoria segun la logica vigente.
 
 Las secciones Cuadro, Partidos, Participantes, Programacion y Disciplina deben mostrar datos de la categoria seleccionada, sin mezclar informacion de otras categorias del mismo torneo.
 
@@ -1225,15 +1025,6 @@ Las suspensiones de resto de jornada y fin de semana se ejecutan desde Ajustes o
 
 La accion Finalizar torneo debe estar visible en el encabezado como accion critica. Si quedan partidos sin finalizar, GAME debe mostrar una confirmacion explicita indicando la cantidad de partidos pendientes. Si el profesor confirma, el torneo puede cerrarse igualmente, sin inventar resultados ni modificar automaticamente partidos pendientes.
 
-## BYE PRELIMINAR POR CANTIDAD IMPAR
-
-Cuando una categoria utiliza formato Preliminar y la cantidad de jugadores de esa categoria es impar, GAME debe asignar un bye preliminar al jugador mejor ubicado en el ranking de esa misma categoria.
-
-Ese bye preliminar solo resuelve la imposibilidad matematica de emparejar a todos los jugadores en la etapa preliminar inicial.
-
-No debe confundirse con los byes o rondas previas posteriores al cierre de preliminares, que se definen segun rendimiento preliminar y las reglas deportivas del formato.
-
-El ranking utilizado para este bye debe ser siempre el ranking correspondiente a la categoria seleccionada. No se debe comparar jugadores de distintas categorias para definir cabezas, byes o desempates deportivos.
 
 ## CONFIGURACION ADMINISTRATIVA FINAL
 
@@ -1243,7 +1034,7 @@ Configuracion debe concentrar solamente parametros globales reales del circuito:
 - Puntajes.
 - Reglamento.
 
-Tipos de torneo, Disciplina, Notificaciones, Horarios globales y Canchas globales no deben aparecer como configuraciones globales editables duplicadas.
+Disciplina, Notificaciones, Horarios globales y Canchas globales no deben aparecer como configuraciones globales editables duplicadas.
 
 Las categorias creadas por el profesor deben quedar disponibles para registros, altas administrativas de jugadores, inscripciones y creacion de torneos siempre que esten Activas.
 

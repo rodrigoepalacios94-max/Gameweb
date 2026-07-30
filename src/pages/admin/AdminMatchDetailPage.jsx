@@ -66,7 +66,7 @@ export function AdminMatchDetailPage() {
   if (error) return <ErrorState title="No pudimos cargar el partido admin." onRetry={reload} />;
 
   if (!match) {
-    return <EmptyState title="Partido no encontrado" description="No existe un partido mock con ese identificador." />;
+    return <EmptyState title="Partido no encontrado" description="No existe un partido con ese identificador." />;
   }
 
   const winnerName = match.winnerId === match.playerAId ? match.playerA : match.winnerId === match.playerBId ? match.playerB : "Pendiente";
@@ -165,7 +165,7 @@ export function AdminMatchDetailPage() {
           <h2>Estado deportivo</h2>
           <div className="info-list">
             <span>Torneo: {match.tournament}</span>
-            <span>Categoria: {match.category}</span>
+            <span>Categoría: {match.category}</span>
             <span>Ronda: {match.round}</span>
             <span>Fecha: {formatDate(match.date)}</span>
             <span>Hora: {match.time}</span>

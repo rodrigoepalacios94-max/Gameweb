@@ -1,18 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Crosshair } from "lucide-react";
+import championCup from "../../assets/copa.png";
 import { Button } from "../common/Button";
 import { BracketMatch } from "./BracketMatch";
 
 const ROUND_WIDTH = 260;
 const ROUND_GAP = 86;
-const BRACKET_HEIGHT = 1520;
 const MATCH_HEIGHT = 92;
 const HEADER_HEIGHT = 44;
+const CHAMPION_AREA_HEIGHT = 188;
+const CHAMPION_WIDTH = 300;
+const CHAMPION_HEIGHT = 148;
+const CHAMPION_TOP = 18;
+const TREE_SLOT_GAP = 116;
+const TREE_EDGE_PADDING = 24;
 
 const ROUND_KEYS = [
   { key: "round32", label: "32avos", names: ["32avos", "round-32"] },
   { key: "round16", label: "16avos", names: ["16avos", "round-16", "cuadro principal"] },
-  { key: "octavos", label: "Octavos", names: ["octavos"] },
+  { key: "octavos", label: "8vos", names: ["octavos", "8vos"] },
   { key: "cuartos", label: "Cuartos", names: ["cuartos"] },
   { key: "semifinal", label: "Semifinal", names: ["semifinal"] },
 ];
@@ -36,22 +42,44 @@ function findRound(rounds, names) {
   });
 }
 
-function splitMatches(round, key) {
-  const matches = round?.matches || [];
-  if (key === "round32") {
-    return { left: matches.slice(0, 1), right: matches.slice(1, 2) };
-  }
-  const half = Math.ceil(matches.length / 2);
-  return { left: matches.slice(0, half), right: matches.slice(half) };
+function getMatchSide(match, index, count) {
+  if (match?.logicalSide === "left" || match?.logicalSide === "right") return match.logicalSide;
+  return index < Math.ceil(count / 2) ? "left" : "right";
 }
 
-function getMatchTop(index, count, side, key) {
+function splitMatches(round) {
+  const matches = round?.matches || [];
+  return matches.reduce((groups, match, index) => {
+    groups[getMatchSide(match, index, matches.length)].push(match);
+    return groups;
+  }, { left: [], right: [] });
+}
+
+function getTreeMetrics(bracket) {
+  const baseDrawSize = Number(bracket?.baseDrawSize || 16);
+  const sideSlotCount = Math.max(baseDrawSize / 2, 2);
+  const halfHeight = (sideSlotCount / 2 - 0.5) * TREE_SLOT_GAP + MATCH_HEIGHT / 2 + TREE_EDGE_PADDING;
+  return {
+    baseDrawSize,
+    sideSlotCount,
+    centerY: halfHeight,
+    height: halfHeight * 2,
+    slotGap: TREE_SLOT_GAP,
+  };
+}
+
+function getMatchTop(match, index, count, metrics) {
   if (!count) return 0;
-  if (key === "round32") {
-    const slot = side === "left" ? 0.5 : 7.5;
-    return (slot / 8) * BRACKET_HEIGHT - MATCH_HEIGHT / 2;
+  if (
+    Number.isFinite(match?.treeSlotStart)
+    && Number.isFinite(match?.treeSlotSpan)
+    && (match.logicalSide === "left" || match.logicalSide === "right")
+  ) {
+    const localStart = match.logicalSide === "right" ? match.treeSlotStart - metrics.baseDrawSize / 2 : match.treeSlotStart;
+    const localCenter = localStart + match.treeSlotSpan / 2;
+    return metrics.centerY + (localCenter - metrics.sideSlotCount / 2) * metrics.slotGap - MATCH_HEIGHT / 2;
   }
-  return ((index + 0.5) / count) * BRACKET_HEIGHT - MATCH_HEIGHT / 2;
+  return ((index + 0.5) / count) * metrics.height - MATCH_HEIGHT / 2;
 }
 
 function getColumnX(index) {
@@ -60,7 +88,7 @@ function getColumnX(index) {
 
 function getColumnPoint(column, position, edge) {
   const x = getColumnX(column.index) + (edge === "left" ? 0 : ROUND_WIDTH);
-  const y = HEADER_HEIGHT + position.top + MATCH_HEIGHT / 2;
+  const y = HEADER_HEIGHT + CHAMPION_AREA_HEIGHT + position.top + MATCH_HEIGHT / 2;
   return { x, y };
 }
 
@@ -110,6 +138,105 @@ function buildFinalConnections(leftColumns, finalColumn, rightColumns) {
   ].filter(Boolean);
 }
 
+function buildExplicitConnections(columns) {
+  const positionsByMatchId = new Map();
+  columns.forEach((column) => {
+    column.positions.forEach((position) => {
+      if (position.match.matchId) positionsByMatchId.set(position.match.matchId, { column, position });
+    });
+  });
+
+  return columns.flatMap((column) =>
+    column.positions.map((position) => {
+      const target = positionsByMatchId.get(position.match.childMatchId);
+      if (!target) return null;
+      const movesRight = column.index < target.column.index;
+      return {
+        id: `explicit-${position.match.matchId}-${position.match.childMatchId}`,
+        from: getColumnPoint(column, position, movesRight ? "right" : "left"),
+        to: getColumnPoint(target.column, target.position, movesRight ? "left" : "right"),
+        active: Boolean(position.match.winner),
+      };
+    }).filter(Boolean),
+  );
+}
+
+function getPositionCenter(position) {
+  return position.top + MATCH_HEIGHT / 2;
+}
+
+function validateLayoutGeometry(bracket, columns, champion, metrics) {
+  const errors = [];
+  const positionsByMatchId = new Map();
+  columns.forEach((column) => {
+    const sorted = [...column.positions].sort((a, b) => a.top - b.top);
+    sorted.forEach((position, index) => {
+      if (position.top < -0.5 || position.top + MATCH_HEIGHT > metrics.height + 0.5) {
+        errors.push(`${column.label}: ${position.match.matchId} queda fuera del canvas vertical.`);
+      }
+      const next = sorted[index + 1];
+      if (next && next.top < position.top + MATCH_HEIGHT) {
+        errors.push(`${column.label}: ${position.match.matchId} se superpone con ${next.match.matchId}.`);
+      }
+      if (position.match.matchId) positionsByMatchId.set(position.match.matchId, { column, position });
+    });
+  });
+
+  const finalPosition = columns.find((column) => column.key === "final")?.positions?.[0];
+  if (finalPosition && Math.abs(getPositionCenter(finalPosition) - metrics.centerY) > 0.5) {
+    errors.push(`Final fuera del eje central: esperado ${metrics.centerY}, real ${getPositionCenter(finalPosition)}.`);
+  }
+  if (champion && finalPosition && Math.abs(champion.centerX - (getColumnX(columns.find((column) => column.key === "final").index) + ROUND_WIDTH / 2)) > 0.5) {
+    errors.push("La copa no comparte el centro X de la final.");
+  }
+
+  const parentsByChild = new Map();
+  positionsByMatchId.forEach(({ position }, matchId) => {
+    if (!position.match.childMatchId) return;
+    const current = parentsByChild.get(position.match.childMatchId) || [];
+    current.push({ matchId, position });
+    parentsByChild.set(position.match.childMatchId, current);
+  });
+  parentsByChild.forEach((parents, childMatchId) => {
+    const child = positionsByMatchId.get(childMatchId);
+    if (!child || parents.length !== 2) return;
+    const expected = (getPositionCenter(parents[0].position) + getPositionCenter(parents[1].position)) / 2;
+    const actual = getPositionCenter(child.position);
+    if (Math.abs(expected - actual) > 0.5) {
+      errors.push(`${childMatchId}: centro esperado ${expected}, real ${actual}; padres ${parents.map((item) => item.matchId).join(", ")}.`);
+    }
+  });
+
+  const leftOffsets = new Map();
+  const rightOffsets = new Map();
+  columns.forEach((column) => {
+    if (column.side !== "left" && column.side !== "right") return;
+    const target = column.side === "left" ? leftOffsets : rightOffsets;
+    target.set(column.key, column.positions.map((position) => Math.round(Math.abs(getPositionCenter(position) - metrics.centerY))).sort((a, b) => a - b));
+  });
+  leftOffsets.forEach((offsets, key) => {
+    const right = rightOffsets.get(key);
+    if (right != null && right.length === offsets.length && right.join(",") !== offsets.join(",")) {
+      errors.push(`${key}: offsets izquierda ${offsets.join(",")}; derecha ${right.join(",")}.`);
+    }
+  });
+
+  if (errors.length && import.meta.env.DEV) {
+    console.error(`Layout de bracket invalido${bracket?.categoryName ? ` - ${bracket.categoryName}` : ""}`, errors);
+  }
+  return errors;
+}
+
+function getFinalWinner(finalMatch, bracket) {
+  if (!finalMatch || !bracket?.champion) return null;
+  const winnerName = finalMatch.winner || bracket.champion;
+  if (!winnerName) return null;
+  return {
+    name: winnerName,
+    matchId: finalMatch.matchId,
+  };
+}
+
 function connectionPath(connection) {
   const midX = connection.from.x + (connection.to.x - connection.from.x) / 2;
   return `M ${connection.from.x} ${connection.from.y} H ${midX} V ${connection.to.y} H ${connection.to.x}`;
@@ -123,12 +250,13 @@ export function TournamentBracket({ bracket, detailBasePath = "/admin/matches", 
 
   const layout = useMemo(() => {
     const rounds = bracket?.rounds || [];
+    const metrics = getTreeMetrics(bracket);
     const splitRounds = ROUND_KEYS.map((roundSpec) => {
       const round = findRound(rounds, roundSpec.names);
       return {
         ...roundSpec,
         round,
-        ...splitMatches(round, roundSpec.key),
+        ...splitMatches(round),
       };
     }).filter((round) => round.left.length || round.right.length);
 
@@ -151,23 +279,42 @@ export function TournamentBracket({ bracket, detailBasePath = "/admin/matches", 
       positions: column.matches.map((match, matchIndex) => ({
         match,
         top: column.key === "final"
-          ? BRACKET_HEIGHT / 2 - MATCH_HEIGHT / 2
-          : getMatchTop(matchIndex, column.matches.length, column.side, column.key),
+          ? metrics.centerY - MATCH_HEIGHT / 2
+          : getMatchTop(match, matchIndex, column.matches.length, metrics),
       })),
     }));
 
     const leftVisual = visualColumns.filter((column) => column.side === "left");
     const finalColumn = visualColumns.find((column) => column.key === "final");
     const rightVisual = visualColumns.filter((column) => column.side === "right");
-    const connections = [
-      ...buildSideConnections(leftVisual, "left"),
-      ...buildSideConnections(rightVisual, "right"),
-      ...(finalColumn ? buildFinalConnections(leftVisual, finalColumn, rightVisual) : []),
-    ];
+    const explicitConnections = buildExplicitConnections(visualColumns);
+    const connections = explicitConnections.length
+      ? explicitConnections
+      : [
+          ...buildSideConnections(leftVisual, "left"),
+          ...buildSideConnections(rightVisual, "right"),
+          ...(finalColumn ? buildFinalConnections(leftVisual, finalColumn, rightVisual) : []),
+        ];
+    const finalPosition = finalColumn?.positions?.[0] || null;
+    const champion = getFinalWinner(finalPosition?.match, bracket);
+    const championLayout = champion && finalColumn && finalPosition
+      ? {
+          ...champion,
+          x: getColumnX(finalColumn.index) + ROUND_WIDTH / 2 - CHAMPION_WIDTH / 2,
+          y: HEADER_HEIGHT + CHAMPION_TOP,
+          centerX: getColumnX(finalColumn.index) + ROUND_WIDTH / 2,
+          lineStartY: HEADER_HEIGHT + CHAMPION_AREA_HEIGHT + finalPosition.top,
+          lineEndY: HEADER_HEIGHT + CHAMPION_TOP + CHAMPION_HEIGHT,
+        }
+      : null;
+    const layoutErrors = validateLayoutGeometry(bracket, visualColumns, championLayout, metrics);
 
     return {
       columns: visualColumns,
       connections,
+      champion: championLayout,
+      treeHeight: metrics.height,
+      layoutErrors,
       width: visualColumns.length * ROUND_WIDTH + Math.max(visualColumns.length - 1, 0) * ROUND_GAP,
     };
   }, [bracket]);
@@ -269,22 +416,42 @@ export function TournamentBracket({ bracket, detailBasePath = "/admin/matches", 
             "--bracket-board-width": `${layout.width}px`,
             "--bracket-round-width": `${ROUND_WIDTH}px`,
             "--bracket-gap": `${ROUND_GAP}px`,
-            "--bracket-height": `${BRACKET_HEIGHT}px`,
+            "--bracket-height": `${layout.treeHeight}px`,
             "--bracket-header-height": `${HEADER_HEIGHT}px`,
+            "--bracket-champion-area-height": `${CHAMPION_AREA_HEIGHT}px`,
             "--bracket-columns": layout.columns.length,
           }}
         >
-          <svg className="bracket-connections" width={layout.width} height={BRACKET_HEIGHT + HEADER_HEIGHT} aria-hidden="true">
+          <svg className="bracket-connections" width={layout.width} height={layout.treeHeight + HEADER_HEIGHT + CHAMPION_AREA_HEIGHT} aria-hidden="true">
+            {layout.champion ? (
+              <path
+                className="bracket-champion-line is-active"
+                d={`M ${layout.champion.centerX} ${layout.champion.lineStartY} V ${layout.champion.lineEndY}`}
+              />
+            ) : null}
             {layout.connections.map((connection) => (
               <path key={connection.id} className={connection.active ? "bracket-connector is-active" : "bracket-connector"} d={connectionPath(connection)} />
             ))}
           </svg>
+          {layout.champion ? (
+            <div
+              className="bracket-champion-card"
+              style={{
+                left: `${layout.champion.x}px`,
+                top: `${layout.champion.y}px`,
+              }}
+            >
+              <img src={championCup} alt="" />
+              <span>CAMPEÓN</span>
+              <strong title={layout.champion.name}>{layout.champion.name}</strong>
+            </div>
+          ) : null}
           {layout.columns.map((column) => (
             <section key={`${column.side}-${column.key}`} className={column.key === "final" ? "bracket-round bracket-round--final" : `bracket-round bracket-round--${column.side}`}>
               <h3>{column.label}</h3>
               <div className="bracket-round-lane">
                 {column.positions.map((position) => (
-                  <div key={position.match.id} className="bracket-match-slot" style={{ top: `${position.top}px` }}>
+                  <div key={position.match.id} className="bracket-match-slot" style={{ top: `calc(var(--bracket-champion-area-height) + ${position.top}px)` }}>
                     <BracketMatch match={position.match} detailBasePath={detailBasePath} compact onOpen={onMatchOpen} />
                   </div>
                 ))}

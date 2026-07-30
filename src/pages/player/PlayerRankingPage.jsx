@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { Avatar } from "../../components/common/Avatar";
-import { Badge } from "../../components/common/Badge";
 import { Card } from "../../components/common/Card";
 import { EmptyState } from "../../components/common/EmptyState";
 import { ErrorState } from "../../components/common/ErrorState";
 import { LoadingState } from "../../components/common/LoadingState";
 import { Modal } from "../../components/common/Modal";
 import { Select } from "../../components/common/Select";
+import { RankingTable } from "../../components/player/RankingTable";
+import { RankingPodium } from "../../components/ranking/RankingPodium";
 import { useAuth } from "../../context/AuthContext";
 import { useAsyncData } from "../../hooks/useAsyncData";
 import { categoryService } from "../../services/categoryService";
@@ -14,12 +15,12 @@ import { rankingService } from "../../services/rankingService";
 
 export function PlayerRankingPage() {
   const { user } = useAuth();
-  const [categoryId, setCategoryId] = useState(user.categoryId);
+  const [categoryId, setCategoryId] = useState(user.categoryId || "");
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const { data, loading, error, reload } = useAsyncData(async () => {
     const [categories, entries] = await Promise.all([
       categoryService.getCategories(),
-      rankingService.getRankingByCategory(categoryId),
+      categoryId ? rankingService.getRankingByCategory(categoryId) : Promise.resolve([]),
     ]);
     return { categories, entries };
   }, [categoryId]);
@@ -28,64 +29,47 @@ export function PlayerRankingPage() {
   if (error) return <ErrorState title="No pudimos cargar el ranking." onRetry={reload} />;
 
   const { categories, entries } = data;
-  const podium = entries.slice(0, 3);
-  const tableEntries = entries.slice(3);
+  const selectedCategory = categories.find((category) => category.id === categoryId);
+  const currentEntry = entries.find((entry) => entry.playerId === user.id);
+  const currentRankingPlayerId = currentEntry?.playerId || null;
 
   return (
     <div className="page-stack">
       <header className="page-header page-header--wide">
         <span className="eyebrow">Ranking</span>
         <h1>Ranking del circuito</h1>
-        <p>Vista mock por categoria. El ranking general se reserva para cabezas de serie y desempates segun estructura.md.</p>
+        <p>Consulta las posiciones de cada categoria.</p>
       </header>
 
       <Card>
         <Select
-          label="Categoria"
+          label="Categoría"
           value={categoryId}
           onChange={setCategoryId}
-          options={categories.filter((category) => category.status === "Activa").map((category) => ({
-            value: category.id,
-            label: `${category.name} ${category.branch}`,
-          }))}
+          options={[
+            { value: "", label: "Seleccioná una categoría" },
+            ...categories.filter((category) => category.status === "Activa").map((category) => ({
+              value: category.id,
+              label: `${category.name} ${category.branch}`,
+            })),
+          ]}
         />
       </Card>
 
       {entries.length ? (
         <>
-          <section className="podium-grid">
-            {podium.map((entry) => (
-              <button key={entry.playerId} className={`podium-card position-${entry.position}`} type="button" onClick={() => setSelectedPlayer(entry.player)}>
-                <Badge tone={entry.position === 1 ? "success" : "warning"}>#{entry.position}</Badge>
-                <Avatar src={entry.player.avatar} name={entry.player.fullName} size="lg" />
-                <strong>{entry.player.fullName}</strong>
-                <span>{entry.player.categoryName}</span>
-                <b>{entry.points} pts</b>
-              </button>
-            ))}
-          </section>
+          <RankingPodium entries={entries} currentPlayerId={currentRankingPlayerId} onPlayerClick={setSelectedPlayer} />
 
           <Card>
-            <div className="ranking-pro-list">
-              {tableEntries.map((entry) => (
-                <button
-                  key={entry.playerId}
-                  className={entry.playerId === user.id ? "ranking-pro-row is-current" : "ranking-pro-row"}
-                  type="button"
-                  onClick={() => setSelectedPlayer(entry.player)}
-                >
-                  <strong>#{entry.position}</strong>
-                  <Avatar src={entry.player.avatar} name={entry.player.fullName} size="sm" />
-                  <span>{entry.player.fullName}</span>
-                  <span>{entry.player.categoryName}</span>
-                  <b>{entry.points} pts</b>
-                </button>
-              ))}
+            <div className="section-title">
+              <span>Ranking completo - {selectedCategory ? `${selectedCategory.name} ${selectedCategory.branch}` : "Categoría"}</span>
+              <strong>{currentEntry ? `TU POSICION #${currentEntry.position}` : `${entries.length} jugadores`}</strong>
             </div>
+            <RankingTable entries={entries} currentPlayerId={currentRankingPlayerId} onPlayerClick={setSelectedPlayer} />
           </Card>
         </>
       ) : (
-        <EmptyState title="Sin ranking para esta categoria" description="Cuando haya puntos registrados, la tabla se mostrara aca." />
+        <EmptyState title="EL RANKING TODAVÍA NO TIENE DATOS" description="Cuando haya puntos registrados, la tabla se mostrará acá." />
       )}
 
       <Modal open={Boolean(selectedPlayer)} title="Perfil deportivo" onClose={() => setSelectedPlayer(null)}>
@@ -94,7 +78,7 @@ export function PlayerRankingPage() {
             <Avatar src={selectedPlayer.avatar} name={selectedPlayer.fullName} size="lg" />
             <h3>{selectedPlayer.fullName}</h3>
             <div className="info-list">
-              <span>Categoria: {selectedPlayer.categoryName}</span>
+              <span>Categoría: {selectedPlayer.categoryName}</span>
               <span>Ranking: #{selectedPlayer.ranking}</span>
               <span>Puntos: {selectedPlayer.points}</span>
               <span>Partidos: {selectedPlayer.stats.played}</span>

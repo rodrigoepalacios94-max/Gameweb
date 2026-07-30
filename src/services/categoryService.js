@@ -1,4 +1,3 @@
-import { createMockId, mutateMockData, readMockData } from "../mocks/mockDatabase";
 import {
   canPlayerRegisterInCategory,
   getAllowedSuperiorCategories,
@@ -6,64 +5,160 @@ import {
   getSameOrAllowedCategories,
   isLowerCategory,
 } from "../utils/categoryRules";
-import { auditService } from "./auditService";
-import { mockRequest } from "./serviceUtils";
+import {
+  createDataError,
+  ensureSupabaseDataClient,
+  isForeignKeyViolation,
+  isUniqueViolation,
+} from "./supabaseDataUtils";
+
+function mapCategory(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    branch: row.branch || "Masculino",
+    level: Number(row.level || 1),
+    isActive: Boolean(row.is_active),
+    status: row.is_active ? "Activa" : "Inactiva",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapCategoryPayload(payload) {
+  const mapped = {};
+  if ("name" in payload) mapped.name = String(payload.name || "").trim();
+  if ("branch" in payload) mapped.branch = payload.branch || "Masculino";
+  if ("level" in payload) mapped.level = Number(payload.level || 1);
+  if ("status" in payload) mapped.is_active = payload.status === "Activa" || payload.status === "active" || payload.status === true;
+  if ("isActive" in payload) mapped.is_active = Boolean(payload.isActive);
+  if ("is_active" in payload) mapped.is_active = Boolean(payload.is_active);
+  return mapped;
+}
+
+function mapCategoryError(error, fallbackMessage) {
+  if (isUniqueViolation(error)) {
+    return createDataError("YA EXISTE UNA CATEGORÍA CON ESE NOMBRE", {
+      code: "CATEGORY_NAME_EXISTS",
+      field: "name",
+      cause: error,
+    });
+  }
+  return createDataError(fallbackMessage, { cause: error });
+}
+
+async function fetchCategoriesQuery(query, fallbackMessage) {
+  const { data, error } = await query;
+  if (error) throw createDataError(fallbackMessage, { cause: error });
+  return (data || []).map(mapCategory);
+}
 
 export const categoryService = {
   async getCategories() {
-    return mockRequest(() => readMockData((db) => db.categories), "No pudimos cargar las categorias.");
+    const client = ensureSupabaseDataClient();
+    return fetchCategoriesQuery(
+      client
+        .from("categories")
+        .select("id, name, branch, level, is_active, created_at, updated_at")
+        .order("level", { ascending: true })
+        .order("name", { ascending: true }),
+      "NO PUDIMOS CARGAR LAS CATEGORÍAS",
+    );
   },
+
+  async getActiveCategories() {
+    const client = ensureSupabaseDataClient();
+    return fetchCategoriesQuery(
+      client
+        .from("categories")
+        .select("id, name, branch, level, is_active, created_at, updated_at")
+        .eq("is_active", true)
+        .order("level", { ascending: true })
+        .order("name", { ascending: true }),
+      "NO PUDIMOS CARGAR LAS CATEGORÍAS",
+    );
+  },
+
   async getCategoryById(id) {
-    return mockRequest(() => readMockData((db) => db.categories.find((category) => category.id === id) || null), "No pudimos cargar la categoria.");
+    const client = ensureSupabaseDataClient();
+    const { data, error } = await client
+      .from("categories")
+      .select("id, name, branch, level, is_active, created_at, updated_at")
+      .eq("id", id)
+      .maybeSingle();
+    if (error) throw createDataError("NO PUDIMOS CARGAR LA CATEGORÍA", { cause: error });
+    return mapCategory(data);
   },
+
   async getCategoryRulesForPlayer(playerId) {
-    return mockRequest(() =>
-      readMockData((db) => {
-        const player = db.players.find((item) => item.id === playerId);
-        const playerCategory = db.categories.find((category) => category.id === player?.categoryId);
-        return {
-          currentCategory: playerCategory,
-          allowedCategories: getSameOrAllowedCategories(playerCategory, db.categories),
-          superiorCategories: getAllowedSuperiorCategories(playerCategory, db.categories),
-          lowerCategories: getBlockedLowerCategories(playerCategory, db.categories),
-        };
-      }), "No pudimos calcular reglas de categoria.");
+    const client = ensureSupabaseDataClient();
+    const [{ data: player, error: playerError }, categories] = await Promise.all([
+      client
+        .from("players")
+        .select("id, current_category_id")
+        .eq("id", playerId)
+        .maybeSingle(),
+      this.getCategories(),
+    ]);
+
+    if (playerError) throw createDataError("NO PUDIMOS CALCULAR REGLAS DE CATEGORÍA", { cause: playerError });
+
+    const playerCategory = categories.find((category) => category.id === player?.current_category_id) || null;
+    return {
+      currentCategory: playerCategory,
+      allowedCategories: getSameOrAllowedCategories(playerCategory, categories),
+      superiorCategories: getAllowedSuperiorCategories(playerCategory, categories),
+      lowerCategories: getBlockedLowerCategories(playerCategory, categories),
+    };
   },
+
   canPlayerRegisterInCategory,
   isLowerCategory,
-  async createCategory(payload, actor = "admin-1") {
-    return mockRequest(async () => {
-      const category = mutateMockData((db) => {
-        const created = { id: createMockId("cat"), status: "Activa", ...payload };
-        db.categories.push(created);
-        return created;
-      });
-      await auditService.record({
-        action: "create_category",
-        entityType: "category",
-        entityId: category.id,
-        description: `Categoria creada: ${category.name} ${category.branch}`,
-        actor,
-      });
-      return category;
-    }, "No pudimos crear la categoria.");
+
+  async createCategory(payload) {
+    const client = ensureSupabaseDataClient();
+    const mapped = mapCategoryPayload(payload);
+    const { data, error } = await client
+      .from("categories")
+      .insert(mapped)
+      .select("id, name, branch, level, is_active, created_at, updated_at")
+      .single();
+    if (error) throw mapCategoryError(error, "NO PUDIMOS CREAR LA CATEGORÍA");
+    return mapCategory(data);
   },
-  async updateCategory(id, updates, actor = "admin-1") {
-    return mockRequest(async () => {
-      const category = mutateMockData((db) => {
-        const target = db.categories.find((item) => item.id === id);
-        if (!target) return null;
-        Object.assign(target, updates);
-        return target;
-      });
-      await auditService.record({
-        action: "update_category",
-        entityType: "category",
-        entityId: id,
-        description: "Categoria actualizada en mock.",
-        actor,
-      });
-      return category;
-    }, "No pudimos actualizar la categoria.");
+
+  async updateCategory(id, updates) {
+    const client = ensureSupabaseDataClient();
+    const { data, error } = await client
+      .from("categories")
+      .update(mapCategoryPayload(updates))
+      .eq("id", id)
+      .select("id, name, branch, level, is_active, created_at, updated_at")
+      .single();
+    if (error) throw mapCategoryError(error, "NO PUDIMOS ACTUALIZAR LA CATEGORÍA");
+    return mapCategory(data);
+  },
+
+  async setCategoryActive(id, active) {
+    return this.updateCategory(id, { isActive: active });
+  },
+
+  async deleteCategory(id) {
+    const client = ensureSupabaseDataClient();
+    const category = await this.getCategoryById(id);
+    const { error } = await client.from("categories").delete().eq("id", id);
+    if (!error) return { deleted: true, category, reasons: [] };
+
+    if (isForeignKeyViolation(error)) {
+      return {
+        deleted: false,
+        blocked: true,
+        category,
+        reasons: ["Esta categoría tiene jugadores asociados."],
+      };
+    }
+
+    throw createDataError("NO PUDIMOS ELIMINAR LA CATEGORÍA", { cause: error });
   },
 };

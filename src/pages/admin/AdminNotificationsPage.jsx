@@ -45,7 +45,7 @@ export function AdminNotificationsPage() {
         <div>
           <span className="eyebrow">Administrador</span>
           <h1>Avisos</h1>
-          <p>Eventos operativos importantes calculados desde los partidos mock.</p>
+          <p>Eventos operativos importantes calculados desde los partidos.</p>
         </div>
         <Button variant="secondary" icon={CheckCheck} disabled={!unreadCount} onClick={markAllRead}>Marcar todas</Button>
       </header>
@@ -60,7 +60,7 @@ export function AdminNotificationsPage() {
           ))}
         </section>
       ) : (
-        <EmptyState title="Sin avisos para este filtro" description="Los eventos nuevos del circuito apareceran aca." />
+        <EmptyState title="Sin avisos para este filtro" description="Los eventos nuevos del circuito aparecerán acá." />
       )}
     </div>
   );

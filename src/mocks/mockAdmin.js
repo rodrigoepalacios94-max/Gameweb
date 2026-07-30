@@ -12,4 +12,5 @@ export const mockSettings = {
     { id: "score-master-game-1500", name: "MASTER GAME 1500", status: "Activo", inscription: 100, preliminary: 120, preliminaryWin: 80, classification: 180, round32: 0, round16: 260, octavos: 380, cuartos: 560, semifinal: 780, runnerUp: 950, champion: 1500, specialBonus: 0 },
   ],
   regulation: null,
+  regulationDocuments: [],
 };

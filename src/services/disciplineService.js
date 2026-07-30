@@ -1,121 +1,243 @@
-import { mutateMockData, readMockData } from "../mocks/mockDatabase";
-import { auditService } from "./auditService";
-import { mockRequest } from "./serviceUtils";
+import { createDataError, ensureSupabaseDataClient, logSupabaseDataError } from "./supabaseDataUtils";
+import { schedulingService } from "./schedulingService";
 
-const FAULT_LIMIT = 3;
+const CLAIM_SELECT = `
+  id,
+  match_id,
+  tournament_id,
+  reporter_player_id,
+  accused_player_id,
+  description,
+  status,
+  created_at,
+  reviewed_at,
+  review_note,
+  tournaments:tournament_id (
+    id,
+    name
+  ),
+  matches:match_id (
+    id,
+    round_name,
+    phase,
+    player1_id,
+    player2_id
+  ),
+  reporter:reporter_player_id (
+    id,
+    first_name,
+    last_name
+  ),
+  accused:accused_player_id (
+    id,
+    first_name,
+    last_name
+  )
+`;
+
+const FAULT_SELECT = `
+  id,
+  claim_id,
+  player_id,
+  match_id,
+  tournament_id,
+  reason,
+  created_at,
+  players:player_id (
+    id,
+    first_name,
+    last_name
+  ),
+  tournaments:tournament_id (
+    id,
+    name
+  ),
+  matches:match_id (
+    id,
+    round_name,
+    phase
+  )
+`;
+
+const statusFromDb = {
+  pending: "Pendiente",
+  approved: "Confirmado",
+  rejected: "Rechazado",
+};
+
+function fullName(player) {
+  return `${player?.first_name || ""} ${player?.last_name || ""}`.trim();
+}
+
+function matchLabel(row) {
+  const reporter = fullName(row.reporter) || "Jugador";
+  const accused = fullName(row.accused) || "Rival";
+  const round = row.matches?.round_name || row.matches?.phase || "Partido";
+  return `${round} / ${reporter} vs ${accused}`;
+}
+
+function mapClaim(row) {
+  if (!row) return null;
+  const reporter = fullName(row.reporter);
+  const accused = fullName(row.accused);
+  return {
+    id: row.id,
+    matchId: row.match_id,
+    tournamentId: row.tournament_id,
+    tournament: row.tournaments?.name || "",
+    categoryId: null,
+    claimantPlayerId: row.reporter_player_id,
+    reporterPlayerId: row.reporter_player_id,
+    claimant: reporter || "Jugador",
+    reportedPlayerId: row.accused_player_id,
+    accusedPlayerId: row.accused_player_id,
+    reportedPlayer: accused || "Rival",
+    accusedPlayer: accused || "Rival",
+    match: matchLabel(row),
+    reason: row.description,
+    description: row.description,
+    status: statusFromDb[row.status] || row.status,
+    statusRaw: row.status,
+    date: row.created_at ? String(row.created_at).slice(0, 10) : "",
+    createdAt: row.created_at,
+    reviewedAt: row.reviewed_at,
+    reviewNote: row.review_note || "",
+  };
+}
+
+function mapFault(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    claimId: row.claim_id,
+    playerId: row.player_id,
+    playerName: fullName(row.players) || "Jugador",
+    matchId: row.match_id,
+    tournamentId: row.tournament_id,
+    tournament: row.tournaments?.name || "",
+    match: row.matches?.round_name || row.matches?.phase || "Partido",
+    reason: row.reason,
+    date: row.created_at ? String(row.created_at).slice(0, 10) : "",
+    createdAt: row.created_at,
+  };
+}
+
+function mapClaimRpcError(error) {
+  const message = String(error?.message || "");
+  if (message.includes("DESCRIPTION_REQUIRED")) return createDataError("La descripción es obligatoria.", { code: "DESCRIPTION_REQUIRED", cause: error });
+  if (message.includes("DISCIPLINE_CLAIM_PENDING")) return createDataError("Ya existe un reclamo pendiente para este partido.", { code: "DISCIPLINE_CLAIM_PENDING", cause: error });
+  if (message.includes("PLAYER_NOT_IN_MATCH")) return createDataError("No podés reclamar faltas en un partido ajeno.", { code: "PLAYER_NOT_IN_MATCH", cause: error });
+  if (message.includes("MATCH_PLAYERS_REQUIRED")) return createDataError("El partido todavía no tiene ambos jugadores definidos.", { code: "MATCH_PLAYERS_REQUIRED", cause: error });
+  return createDataError("No pudimos enviar el reclamo.", { cause: error });
+}
 
 export const disciplineService = {
-  async getClaims() {
-    return mockRequest(() => readMockData((db) => db.disciplineClaims), "No pudimos cargar reclamos.");
+  async getClaims(filters = {}) {
+    const client = ensureSupabaseDataClient();
+    let query = client.from("discipline_claims").select(CLAIM_SELECT).order("created_at", { ascending: false });
+    if (filters.matchId) query = query.eq("match_id", filters.matchId);
+    if (filters.tournamentId) query = query.eq("tournament_id", filters.tournamentId);
+    if (filters.status) query = query.eq("status", filters.status);
+    const { data, error } = await query;
+    if (error) {
+      logSupabaseDataError("discipline claims list", error);
+      throw createDataError("NO PUDIMOS CARGAR RECLAMOS DISCIPLINARIOS", { cause: error });
+    }
+    return (data || []).map(mapClaim).filter(Boolean);
   },
-  async getFaults() {
-    return mockRequest(() => readMockData((db) => db.disciplineFaults), "No pudimos cargar faltas.");
+
+  async getFaults(filters = {}) {
+    const client = ensureSupabaseDataClient();
+    let query = client.from("player_discipline_faults").select(FAULT_SELECT).order("created_at", { ascending: false });
+    if (filters.playerId) query = query.eq("player_id", filters.playerId);
+    if (filters.matchId) query = query.eq("match_id", filters.matchId);
+    if (filters.tournamentId) query = query.eq("tournament_id", filters.tournamentId);
+    const { data, error } = await query;
+    if (error) {
+      logSupabaseDataError("discipline faults list", error);
+      throw createDataError("NO PUDIMOS CARGAR FALTAS DISCIPLINARIAS", { cause: error });
+    }
+    return (data || []).map(mapFault).filter(Boolean);
   },
+
   async getPlayerDiscipline(playerId) {
-    return mockRequest(() =>
-      readMockData((db) => ({
-        claims: db.disciplineClaims.filter((claim) => claim.reportedPlayerId === playerId || claim.claimantPlayerId === playerId || claim.reportedPlayer === db.players.find((player) => player.id === playerId)?.fullName),
-        faults: db.disciplineFaults.filter((fault) => fault.playerId === playerId),
-        status: db.players.find((player) => player.id === playerId)?.discipline,
-      })), "No pudimos cargar disciplina del jugador.");
+    const [claims, faults] = await Promise.all([
+      this.getClaims(),
+      this.getFaults({ playerId }),
+    ]);
+    const relatedClaims = claims.filter((claim) => claim.reporterPlayerId === playerId || claim.accusedPlayerId === playerId);
+    return {
+      claims: relatedClaims,
+      faults,
+      status: faults.length >= 3 ? "Bloqueado" : faults.length ? "Seguimiento" : "Sin sanciones",
+    };
   },
-  async confirmClaim(id, actor = "admin-1") {
-    return mockRequest(async () => {
-      let autoBlockedPlayer = null;
-      const claim = mutateMockData((db) => {
-        const target = db.disciplineClaims.find((item) => item.id === id);
-        if (!target) return null;
-        target.status = "Confirmado";
-        const player = db.players.find((item) => item.fullName === target.reportedPlayer || item.id === target.reportedPlayerId);
-        if (player) {
-          player.discipline.faults += 1;
-          if (player.discipline.faults >= FAULT_LIMIT) {
-            player.discipline.status = "Bloqueado";
-            player.status = "Bloqueado por faltas";
-            autoBlockedPlayer = player;
-          }
-          db.disciplineFaults.push({
-            id: `fault-${Date.now()}`,
-            playerId: player.id,
-            reason: target.reason,
-            date: new Date().toISOString().slice(0, 10),
-          });
-        }
-        return target;
-      });
-      await auditService.record({
-        action: "confirm_claim",
-        entityType: "discipline_claim",
-        entityId: id,
-        description: "Reclamo confirmado en mock.",
-        actor,
-      });
-      if (autoBlockedPlayer) {
-        await auditService.record({
-          action: "auto_block_player",
-          entityType: "player",
-          entityId: autoBlockedPlayer.id,
-          description: "Jugador bloqueado automaticamente al alcanzar 3 faltas confirmadas.",
-          actor,
-        });
+
+  async createClaim({ matchId, description }) {
+    const client = ensureSupabaseDataClient();
+    const { data, error } = await client.rpc("create_match_discipline_claim", {
+      p_match_id: matchId,
+      p_description: description,
+    });
+    if (error) {
+      logSupabaseDataError("discipline claim create", error);
+      throw mapClaimRpcError(error);
+    }
+    const claims = await this.getClaims({ matchId });
+    return claims.find((claim) => claim.id === data) || null;
+  },
+
+  async confirmClaim(claimId, reviewNote = "") {
+    const client = ensureSupabaseDataClient();
+    const { data, error } = await client.rpc("review_match_discipline_claim", {
+      p_claim_id: claimId,
+      p_status: "approved",
+      p_review_note: reviewNote || null,
+    });
+    if (error) {
+      logSupabaseDataError("discipline claim approve", error);
+      throw createDataError("NO PUDIMOS APROBAR EL RECLAMO", { cause: error });
+    }
+    const elimination = data?.disciplinaryElimination;
+    if (elimination?.scheduleRecalculationRequired && elimination?.tournamentId) {
+      try {
+        await schedulingService.recalculateSchedule(elimination.tournamentId, { preserveScheduled: true });
+      } catch (scheduleError) {
+        logSupabaseDataError("discipline schedule recalculation", scheduleError.cause || scheduleError);
       }
-      return claim;
-    }, "No pudimos confirmar el reclamo.");
+    }
+    return data;
   },
-  async rejectClaim(id, actor = "admin-1") {
-    return mockRequest(async () => {
-      const claim = mutateMockData((db) => {
-        const target = db.disciplineClaims.find((item) => item.id === id);
-        if (!target) return null;
-        target.status = "Rechazado";
-        return target;
-      });
-      await auditService.record({
-        action: "reject_claim",
-        entityType: "discipline_claim",
-        entityId: id,
-        description: "Reclamo rechazado en mock.",
-        actor,
-      });
-      return claim;
-    }, "No pudimos rechazar el reclamo.");
+
+  async rejectClaim(claimId, reviewNote = "") {
+    const client = ensureSupabaseDataClient();
+    const { data, error } = await client.rpc("review_match_discipline_claim", {
+      p_claim_id: claimId,
+      p_status: "rejected",
+      p_review_note: reviewNote || null,
+    });
+    if (error) {
+      logSupabaseDataError("discipline claim reject", error);
+      throw createDataError("NO PUDIMOS RECHAZAR EL RECLAMO", { cause: error });
+    }
+    return data;
   },
-  async blockPlayer(playerId, actor = "admin-1") {
-    return mockRequest(async () => {
-      const player = mutateMockData((db) => {
-        const target = db.players.find((item) => item.id === playerId);
-        if (!target) return null;
-        target.status = "Bloqueado por faltas";
-        target.discipline.status = "Bloqueado";
-        return target;
-      });
-      await auditService.record({
-        action: "block_player",
-        entityType: "player",
-        entityId: playerId,
-        description: "Jugador bloqueado en mock.",
-        actor,
-      });
-      return player;
-    }, "No pudimos bloquear el jugador.");
+
+  async blockPlayer(playerId) {
+    const { playerService } = await import("./playerService");
+    return playerService.setPlayerStatus(playerId, "Bloqueado por faltas");
   },
-  async unblockPlayer(playerId, actor = "admin-1") {
-    return mockRequest(async () => {
-      const player = mutateMockData((db) => {
-        const target = db.players.find((item) => item.id === playerId);
-        if (!target) return null;
-        target.status = "Activo";
-        target.discipline.status = target.discipline.faults > 0 ? "Advertido" : "Sin sanciones";
-        return target;
-      });
-      await auditService.record({
-        action: "unblock_player",
-        entityType: "player",
-        entityId: playerId,
-        description: "Jugador desbloqueado en mock.",
-        actor,
-      });
-      return player;
-    }, "No pudimos desbloquear el jugador.");
+
+  async unblockPlayer(playerId) {
+    const client = ensureSupabaseDataClient();
+    const { data, error } = await client.rpc("unblock_player_faults", {
+      p_player_id: playerId,
+      p_reason: "admin_unblock",
+    });
+    if (error) {
+      logSupabaseDataError("discipline player unblock", error);
+      throw createDataError("NO PUDIMOS DESBLOQUEAR EL JUGADOR", { cause: error });
+    }
+    return data;
   },
 };

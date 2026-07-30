@@ -10,7 +10,7 @@ import { matchService } from "../../services/matchService";
 
 const filters = [
   { id: "all", label: "Todos" },
-  { id: "upcoming", label: "Proximos" },
+  { id: "upcoming", label: "Próximos" },
   { id: "pending", label: "Pendientes" },
   { id: "finished", label: "Finalizados" },
 ];
@@ -48,7 +48,7 @@ export function PlayerMatchesPage() {
           ))}
         </div>
       ) : (
-        <EmptyState title="No hay partidos para este filtro" description="Cuando se publiquen nuevos cruces van a aparecer aca." />
+        <EmptyState title="No hay partidos para este filtro" description="Cuando se publiquen nuevos cruces van a aparecer acá." />
       )}
     </div>
   );

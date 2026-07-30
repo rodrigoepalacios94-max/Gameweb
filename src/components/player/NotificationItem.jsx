@@ -29,7 +29,7 @@ export function NotificationItem({ notification, onMarkRead }) {
         <div>
           <div className="notification-item__title">
             <strong>{notification.title}</strong>
-            <Badge tone={notification.read ? "neutral" : "warning"}>{notification.read ? "Leido" : "No leido"}</Badge>
+            <Badge tone={notification.read ? "neutral" : "warning"}>{notification.read ? "Leído" : "No leído"}</Badge>
           </div>
           <p>{notification.message}</p>
           <small>
@@ -40,7 +40,7 @@ export function NotificationItem({ notification, onMarkRead }) {
       </Wrapper>
       {!notification.read ? (
         <button className="text-button" type="button" onClick={() => onMarkRead(notification.id)}>
-          Marcar como leido
+          Marcar como leído
         </button>
       ) : null}
     </article>

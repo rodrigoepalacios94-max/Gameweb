@@ -3,6 +3,7 @@ import {
   ArrowRight,
   Bell,
   CalendarDays,
+  CreditCard,
   MapPin,
   Medal,
   Star,
@@ -20,48 +21,109 @@ import { ErrorState } from "../../components/common/ErrorState";
 import { LoadingState } from "../../components/common/LoadingState";
 import { Modal } from "../../components/common/Modal";
 import { StatCard } from "../../components/common/StatCard";
+import { TournamentRegistrationModal } from "../../components/tournaments/TournamentRegistrationModal";
 import { useAuth } from "../../context/AuthContext";
 import { useAsyncData } from "../../hooks/useAsyncData";
 import { availabilityService } from "../../services/availabilityService";
+import { categoryService } from "../../services/categoryService";
+import { enrollmentService } from "../../services/enrollmentService";
 import { matchService } from "../../services/matchService";
 import { notificationService } from "../../services/notificationService";
+import { playerService } from "../../services/playerService";
 import { tournamentService } from "../../services/tournamentService";
 import { formatCurrency, formatDate } from "../../utils/formatters";
+import { buildPlayerTournamentViews } from "../../utils/playerTournamentView";
+import { getVisibleTournamentDescription } from "../../utils/tournamentDescription";
+
+async function loadOptional(label, loader, fallback) {
+  try {
+    return await loader();
+  } catch (error) {
+    console.error(`[GAME Player] ${label}`, {
+      code: error.code || error.cause?.code || null,
+      message: error.message || error.cause?.message || null,
+      details: error.details || error.cause?.details || null,
+      hint: error.hint || error.cause?.hint || null,
+    });
+    return fallback;
+  }
+}
 
 export function PlayerHomePage() {
   const { user } = useAuth();
-  const [selectedUnavailableSlots, setSelectedUnavailableSlots] = useState([]);
+  const [selectedAvailableSlots, setSelectedAvailableSlots] = useState([]);
   const [attendanceModalOpen, setAttendanceModalOpen] = useState(false);
+  const [registrationTournament, setRegistrationTournament] = useState(null);
+  const [pendingPaymentAction, setPendingPaymentAction] = useState("");
+  const [pendingPaymentError, setPendingPaymentError] = useState("");
   const { data, loading, error, reload } = useAsyncData(async () => {
-    const [matches, tournaments, notifications, attendanceRequests] = await Promise.all([
-      matchService.getPlayerMatches(user.id),
-      tournamentService.getTournaments(),
-      notificationService.getNotificationsByRole("player"),
-      availabilityService.getPlayerAttendanceRequests(user.id),
+    const currentPlayer = await loadOptional("current player", () => playerService.getCurrentPlayer(), user);
+    const [matches, tournaments, categories, enrollments, notifications, attendanceRequests, pendingPayments] = await Promise.all([
+      loadOptional("matches", () => matchService.getPlayerMatches(user.id), []),
+      loadOptional("visible tournaments", () => tournamentService.getVisibleTournamentsForPlayer(user.id), []),
+      loadOptional("categories", () => categoryService.getCategories(), []),
+      loadOptional("enrollments", () => enrollmentService.getEnrollmentsByPlayer(user.id), []),
+      loadOptional("notifications", () => notificationService.getNotificationsByRole("player"), []),
+      loadOptional("attendance requests", () => availabilityService.getPlayerAttendanceRequests(user.id), []),
+      loadOptional("pending payments", () => enrollmentService.getPendingPaymentsByPlayer(user.id), []),
     ]);
-    return { matches, tournaments, notifications, attendanceRequests };
+    return {
+      matches,
+      tournaments: buildPlayerTournamentViews({ tournaments, categories, currentPlayer, enrollments }),
+      currentPlayer,
+      enrollments,
+      pendingPayments,
+      notifications,
+      attendanceRequests,
+    };
   }, [user.id]);
 
   if (loading) return <LoadingState message="Cargando tu dashboard..." />;
   if (error) return <ErrorState title="No pudimos cargar el inicio del jugador." onRetry={reload} />;
 
   const scheduledNextMatch = data.matches.find((match) => match.status !== "Finalizado");
-  const featuredTournament = data.tournaments.find((tournament) => tournament.status === "Inscripciones abiertas");
+  const openTournaments = data.tournaments.filter(
+    (tournament) =>
+      tournament.status === "Inscripciones abiertas" &&
+      (tournament.eligibleCategories?.length > 0 || tournament.existingEnrollments?.length > 0),
+  );
   const latestResults = data.matches.filter((match) => match.status === "Finalizado");
   const importantNotifications = data.notifications.filter((notification) => !notification.read).slice(0, 3);
   const attendanceRequest = data.attendanceRequests.find((match) => match.needsAttendanceConfirmation) || data.attendanceRequests[0];
   const nextMatch = attendanceRequest || scheduledNextMatch;
+  const currentPlayer = data.currentPlayer || user;
 
-  function toggleUnavailableSlot(slot) {
-    setSelectedUnavailableSlots((current) => (current.includes(slot) ? current.filter((item) => item !== slot) : [...current, slot]));
+  function toggleAvailableSlot(slot) {
+    setSelectedAvailableSlots((current) => (current.includes(slot) ? current.filter((item) => item !== slot) : [...current, slot]));
   }
 
   async function confirmAttendance() {
     if (!attendanceRequest) return;
-    await availabilityService.confirmAttendance(attendanceRequest.id, user.id, selectedUnavailableSlots);
-    setSelectedUnavailableSlots([]);
+    await availabilityService.confirmAttendance(attendanceRequest.id, user.id, selectedAvailableSlots);
+    setSelectedAvailableSlots([]);
     setAttendanceModalOpen(false);
     reload();
+  }
+
+  async function payPendingRegistration(registrationId) {
+    setPendingPaymentAction(registrationId);
+    setPendingPaymentError("");
+    try {
+      const result = await enrollmentService.payPendingRegistration(registrationId, user.id);
+      if (result.status === "waived") {
+        reload();
+        return;
+      }
+      if (result.checkoutUrl) {
+        window.location.assign(result.checkoutUrl);
+        return;
+      }
+      throw new Error("Mercado Pago no devolvio una URL de checkout.");
+    } catch (error) {
+      setPendingPaymentError(error.cause?.message || error.message || "No pudimos iniciar Mercado Pago.");
+    } finally {
+      setPendingPaymentAction("");
+    }
   }
 
   function getNextMatchBadge(match) {
@@ -93,16 +155,39 @@ export function PlayerHomePage() {
       </section>
 
       <div className="stats-grid">
-        <StatCard label="Categoria" value={user.categoryName} description="Tu categoria actual" icon={UsersRound} />
-        <StatCard label="Ranking" value={`#${user.ranking}`} description="Entre los mejores" icon={Medal} tone="orange" />
+        <StatCard label="Categoría" value={user.categoryName || "Sin categoría"} description="Tu categoría actual" icon={UsersRound} />
+        <StatCard label="Ranking" value={user.ranking ? `#${user.ranking}` : "Sin datos"} description="Entre los mejores" icon={Medal} tone="orange" />
         <StatCard label="Puntos" value={user.points} description="Puntos acumulados" icon={Star} />
       </div>
+
+      {data.pendingPayments?.length ? (
+        <section className="pending-payment-stack">
+          {pendingPaymentError ? <div className="form-alert">{pendingPaymentError}</div> : null}
+          {data.pendingPayments.map((payment) => (
+            <Card key={payment.registrationId} className="pending-payment-card">
+              <div>
+                <span className="eyebrow">Pago pendiente</span>
+                <h2>{payment.tournamentName}</h2>
+                <p>Tenés una inscripción pendiente de pago.</p>
+                <div className="info-list">
+                  <span>Categorías: {payment.categories.map((category) => category.name).join(", ")}</span>
+                  <span>Total: {formatCurrency(payment.totalAmount)}</span>
+                  {payment.paymentDueAt ? <span>Vence: {formatDate(payment.paymentDueAt.slice(0, 10))}</span> : null}
+                </div>
+              </div>
+              <Button variant="orange" disabled={pendingPaymentAction === payment.registrationId} onClick={() => payPendingRegistration(payment.registrationId)}>
+                {pendingPaymentAction === payment.registrationId ? "Abriendo..." : "Pagar ahora"}
+              </Button>
+            </Card>
+          ))}
+        </section>
+      ) : null}
 
       <section className="dashboard-columns dashboard-columns--featured">
         {nextMatch ? (
           <Card className="feature-card next-match-card">
             <div className="section-title">
-              <span>Proximo partido</span>
+              <span>Próximo partido</span>
               <Badge tone={nextMatchBadge.tone}>{nextMatchBadge.label}</Badge>
             </div>
             <div className="match-rival-block">
@@ -128,7 +213,10 @@ export function PlayerHomePage() {
               </div>
             ) : null}
             {nextMatch.needsAttendanceConfirmation ? (
-              <Button className="button--full" onClick={() => setAttendanceModalOpen(true)}>Confirmar asistencia</Button>
+              <Button className="button--full" onClick={() => {
+                setSelectedAvailableSlots(nextMatch.selectedAvailableSlots || []);
+                setAttendanceModalOpen(true);
+              }}>Seleccionar horarios</Button>
             ) : nextMatch.status === "Programado" ? (
               <Link className="button button--orange button--lg button--full" to={`/player/matches/${nextMatch.id}`}>
                 <span>Ver partido</span>
@@ -136,62 +224,85 @@ export function PlayerHomePage() {
             ) : (
               <div className="info-band">
                 <strong>{nextMatch.attendance ? "Disponibilidad enviada" : nextMatch.status}</strong>
-                <span>{nextMatch.pendingRival ? "Esperando rival" : nextMatch.status === "Listo para programar" ? "Listo para programar" : "GAME esta procesando el proximo paso del partido."}</span>
+                <span>{nextMatch.pendingRival ? "Esperando rival" : nextMatch.status === "Listo para programar" ? "Listo para programar" : "GAME está procesando el próximo paso del partido."}</span>
               </div>
             )}
           </Card>
         ) : null}
 
-        {featuredTournament ? (
+        {openTournaments.length ? (
           <Card className="feature-card open-tournament-card">
             <div className="section-title">
               <span>Torneos abiertos</span>
               <Badge tone="success">Inscripciones abiertas</Badge>
             </div>
-            <div className="tournament-feature-title">
-              <div className="feature-icon">
-                <Trophy size={28} />
-              </div>
-              <div>
-                <h2>{featuredTournament.name}</h2>
-                <p>{featuredTournament.description}</p>
-              </div>
+            <div className="dashboard-tournament-list">
+              {openTournaments.map((tournament) => {
+                const isRegistered = tournament.personalStatus === "INSCRIPTO";
+                const canRegister = !isRegistered && tournament.eligibleCategories?.length > 0;
+                const description = getVisibleTournamentDescription(tournament.description);
+                return (
+                  <article key={tournament.id} className="dashboard-tournament-item">
+                    <div className="tournament-feature-title">
+                      <div className="feature-icon">
+                        <Trophy size={28} />
+                      </div>
+                      <div>
+                        <h2>{tournament.name}</h2>
+                        {description ? <p>{description}</p> : null}
+                      </div>
+                    </div>
+                    <div className="dashboard-tournament-meta">
+                      <span>
+                        <CalendarDays size={17} />
+                        {formatDate(tournament.startDate)}
+                      </span>
+                      <span>
+                        <CreditCard size={17} />
+                        {formatCurrency(tournament.price)}
+                      </span>
+                      <Badge tone={isRegistered ? "success" : "neutral"}>{tournament.personalStatus}</Badge>
+                    </div>
+                    <div className="card-actions dashboard-tournament-actions">
+                      {canRegister ? (
+                        <Button size="sm" variant="primary" onClick={() => setRegistrationTournament(tournament)}>
+                          INSCRIBIRME
+                        </Button>
+                      ) : null}
+                      <Link className="button button--outline-green button--sm" to={`/player/tournaments/${tournament.id}`}>
+                        <span>VER TORNEO</span>
+                      </Link>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
-            <div className="feature-divider" />
-            <div className="tournament-metrics">
-              <span>
-                <CalendarDays size={17} />
-                <b>{formatDate(featuredTournament.startDate)}</b>
-                {featuredTournament.type}
-              </span>
-              <span>
-                <b>Categoria</b>
-                GAME 1000
-              </span>
-              <span>
-                <b>Inscripcion</b>
-                {formatCurrency(featuredTournament.price)}
-              </span>
-            </div>
-            <Link className="button button--outline-green button--lg button--full" to={`/player/tournaments/${featuredTournament.id}`}>
-              <span>Ver torneo</span>
-            </Link>
           </Card>
         ) : null}
       </section>
 
-      <Modal open={attendanceModalOpen} title="Confirmar asistencia" size="lg" onClose={() => setAttendanceModalOpen(false)}>
+      <TournamentRegistrationModal
+        open={Boolean(registrationTournament)}
+        tournament={registrationTournament}
+        player={currentPlayer}
+        categories={registrationTournament?.playerTournamentCategories || []}
+        existingEnrollments={registrationTournament?.existingEnrollments || []}
+        onClose={() => setRegistrationTournament(null)}
+        onConfirmed={reload}
+      />
+
+      <Modal open={attendanceModalOpen} title="Definir disponibilidad" size="lg" onClose={() => setAttendanceModalOpen(false)}>
         {attendanceRequest ? (
           <div className="match-result-modal">
             <div className="match-format-panel">
               <div className="info-list">
                 <span>Torneo: {attendanceRequest.tournament}</span>
-                <span>Categoria: {attendanceRequest.category}</span>
+                <span>Categoría: {attendanceRequest.category}</span>
                 <span>Ronda: {attendanceRequest.round}</span>
                 <span>Rival: {attendanceRequest.pendingRival ? "A definir" : attendanceRequest.opponent}</span>
               </div>
             </div>
-            <p className="muted">Marca unicamente los horarios en los que no podes jugar.</p>
+            <p className="muted">Marca los horarios en los que podes jugar. GAME los cruza con los del rival y asigna automaticamente el primer turno compatible.</p>
             <div className="availability-days">
               {(attendanceRequest.availableSlotsByDay || []).map((day) => (
                 <section key={day.key} className="availability-day">
@@ -199,9 +310,10 @@ export function PlayerHomePage() {
                   <span>{day.date ? formatDate(day.date) : ""}</span>
                   <div className="slot-grid slot-grid--compact">
                     {day.slots.map((slot) => (
-                      <label key={slot.id} className={selectedUnavailableSlots.includes(slot.value) ? "check-pill is-selected" : "check-pill"}>
-                        <input type="checkbox" checked={selectedUnavailableSlots.includes(slot.value)} onChange={() => toggleUnavailableSlot(slot.value)} />
+                      <label key={slot.id} className={selectedAvailableSlots.includes(slot.value) ? "check-pill is-selected" : !slot.selectable ? "check-pill is-disabled" : "check-pill"}>
+                        <input type="checkbox" disabled={!slot.selectable} checked={selectedAvailableSlots.includes(slot.value)} onChange={() => toggleAvailableSlot(slot.value)} />
                         <strong>{slot.time}</strong>
+                        <span>{selectedAvailableSlots.includes(slot.value) ? "Seleccionado" : slot.selectable ? "Disponible" : "No disponible"}</span>
                       </label>
                     ))}
                   </div>
@@ -210,7 +322,7 @@ export function PlayerHomePage() {
             </div>
             <div className="wizard-actions">
               <Button variant="ghost" onClick={() => setAttendanceModalOpen(false)}>Cancelar</Button>
-              <Button onClick={confirmAttendance}>Confirmar asistencia</Button>
+              <Button onClick={confirmAttendance}>Guardar disponibilidad</Button>
             </div>
           </div>
         ) : null}
@@ -219,7 +331,7 @@ export function PlayerHomePage() {
       <section className="dashboard-columns">
         <Card className="results-card">
           <div className="section-title">
-            <span>Ultimos resultados</span>
+            <span>Últimos resultados</span>
           </div>
           <div className="compact-list">
             {latestResults.map((match, index) => (

@@ -13,10 +13,11 @@ import { categoryService } from "../../services/categoryService";
 import { enrollmentService } from "../../services/enrollmentService";
 import { playerService } from "../../services/playerService";
 import { tournamentService } from "../../services/tournamentService";
+import { canPayLater, getPaymentDueAt } from "../../utils/paymentRules";
 import { formatCurrency } from "../../utils/formatters";
 
 const steps = [
-  { id: "category", label: "Categoria" },
+  { id: "category", label: "Categoría" },
   { id: "summary", label: "Resumen" },
   { id: "payment", label: "Pago" },
   { id: "confirmed", label: "Confirmada" },
@@ -53,8 +54,8 @@ export function PlayerTournamentRegistrationPage() {
     }
   }, [data, selectedCategoryId]);
 
-  if (loading) return <LoadingState message="Cargando inscripcion..." />;
-  if (error) return <ErrorState title="No pudimos cargar la inscripcion." onRetry={reload} />;
+  if (loading) return <LoadingState message="Cargando inscripción..." />;
+  if (error) return <ErrorState title="No pudimos cargar la inscripción." onRetry={reload} />;
 
   const { tournament, tournamentCategories, categoryRules, allowedCategories } = data;
   if (!tournament) return <Card>Torneo no encontrado.</Card>;
@@ -62,6 +63,8 @@ export function PlayerTournamentRegistrationPage() {
   const benefit = user.benefit;
   const discount = benefit?.percentage || 0;
   const finalPrice = Math.max(0, Number(tournament.price || 0) * (100 - discount) / 100);
+  const paymentDueAt = getPaymentDueAt(tournament);
+  const payLaterAvailable = canPayLater(tournament);
 
   function next() {
     setStepIndex((current) => Math.min(current + 1, steps.length - 1));
@@ -78,38 +81,63 @@ export function PlayerTournamentRegistrationPage() {
     setDescentRequested(true);
   }
 
-  async function payMock() {
+  async function payNow() {
     setRegistrationError("");
     try {
-      const enrollment = await enrollmentService.enrollPlayer({
+      const result = await enrollmentService.startMercadoPagoCheckout({
         tournamentId: tournament.id,
         playerId: user.id,
-        categoryId: selectedCategoryId,
-        categoryName: selectedCategory ? `${selectedCategory.name} ${selectedCategory.branch}` : "",
-        price: finalPrice,
+        categoryIds: [selectedCategoryId],
+        categoryNames: { [selectedCategoryId]: selectedCategory ? `${selectedCategory.name} ${selectedCategory.branch}` : "" },
+        unitPrice: Number(tournament.price || 0),
         benefitPercentage: discount,
-      });
-      const confirmed = await enrollmentService.confirmEnrollment(enrollment.id, user.id);
-      setCreatedEnrollment(confirmed);
+      }, user.id);
+      if (result.status === "waived") {
+        setCreatedEnrollment(result.enrollments?.[0] || null);
+        next();
+        return;
+      }
+      if (result.checkoutUrl) {
+        window.location.assign(result.checkoutUrl);
+        return;
+      }
+      throw new Error("Mercado Pago no devolvio una URL de checkout.");
+    } catch (error) {
+      setRegistrationError(error.cause?.message || error.message || "No pudimos iniciar Mercado Pago.");
+    }
+  }
+
+  async function payLater() {
+    setRegistrationError("");
+    try {
+      const enrollments = await enrollmentService.confirmPayLaterRegistrations({
+        tournamentId: tournament.id,
+        playerId: user.id,
+        categoryIds: [selectedCategoryId],
+        categoryNames: { [selectedCategoryId]: selectedCategory ? `${selectedCategory.name} ${selectedCategory.branch}` : "" },
+        unitPrice: Number(tournament.price || 0),
+        benefitPercentage: discount,
+      }, user.id);
+      setCreatedEnrollment(enrollments[0]);
       next();
     } catch (error) {
-      setRegistrationError(error.cause?.message || error.message || "No pudimos confirmar la inscripcion.");
+      setRegistrationError(error.cause?.message || error.message || "No pudimos reservar tu lugar.");
     }
   }
 
   return (
     <div className="page-stack">
       <header className="page-header">
-        <span className="eyebrow">Inscripcion mock</span>
+        <span className="eyebrow">Inscripción</span>
         <h1>{tournament.name}</h1>
-        <p>Flujo visual preparado para conectar Mercado Pago mas adelante.</p>
+        <p>Elegí la categoría y completá el pago por Mercado Pago o reservá con pago pendiente.</p>
       </header>
       <Tabs tabs={steps} activeTab={steps[stepIndex].id} onChange={(idValue) => setStepIndex(steps.findIndex((step) => step.id === idValue))} />
 
       {steps[stepIndex].id === "category" ? (
         <Card>
-          <h2>Seleccionar categoria</h2>
-          {isBlocked ? <div className="form-alert">Tu cuenta esta bloqueada y no podes inscribirte a torneos.</div> : null}
+          <h2>Seleccionar categoría</h2>
+          {isBlocked ? <div className="form-alert">NO PODÉS INSCRIBIRTE. Tu cuenta deportiva está bloqueada por faltas. Contactá al administrador.</div> : null}
           {allowedCategories.length ? (
             <div className="category-options">
               {allowedCategories.map((category) => (
@@ -126,13 +154,13 @@ export function PlayerTournamentRegistrationPage() {
               ))}
             </div>
           ) : (
-            <p className="muted">No hay categorias disponibles para registrarse.</p>
+            <p className="muted">No hay categorías disponibles para registrarse.</p>
           )}
-          <p className="muted">Categorias del torneo no permitidas: {tournamentCategories.length - allowedCategories.length}</p>
+          <p className="muted">Categorías del torneo no permitidas: {tournamentCategories.length - allowedCategories.length}</p>
           <Button variant="secondary" icon={ShieldQuestion} onClick={requestDescent}>
-            Solicitar descenso de categoria
+            Solicitar descenso de categoría
           </Button>
-          {descentRequested ? <p className="mock-note">Solicitud mock creada: queda pendiente de aprobacion del profesor.</p> : null}
+          {descentRequested ? <p className="mock-note">Solicitud creada: queda pendiente de aprobación del profesor.</p> : null}
         </Card>
       ) : null}
 
@@ -141,9 +169,11 @@ export function PlayerTournamentRegistrationPage() {
           <h2>Resumen</h2>
           <div className="info-list">
             <span>Torneo: {tournament.name}</span>
-            <span>Categoria: {selectedCategory?.name} {selectedCategory?.branch}</span>
-            <span>Precio: {formatCurrency(tournament.price)}</span>
-            {discount ? <span>Beneficio: {discount}% de descuento. Total mock: {formatCurrency(finalPrice)}</span> : null}
+            <span>Categoría: {selectedCategory?.name} {selectedCategory?.branch}</span>
+          <span>Precio: {formatCurrency(tournament.price)}</span>
+            <span>Total: {formatCurrency(finalPrice)}</span>
+            {paymentDueAt ? <span>Pagar después disponible hasta: {paymentDueAt.slice(0, 10)}</span> : null}
+            {discount ? <span>Beneficio: {discount}% de descuento. Total: {formatCurrency(finalPrice)}</span> : null}
             <span>Disponibilidad: se solicita antes de cada partido.</span>
           </div>
         </Card>
@@ -152,24 +182,29 @@ export function PlayerTournamentRegistrationPage() {
       {steps[stepIndex].id === "payment" ? (
         <Card className="payment-card">
           <CreditCard size={34} />
-          <h2>Mercado Pago MOCK</h2>
-          <p>Este boton simula el inicio y aprobacion del pago. No realiza ninguna integracion real.</p>
+          <h2>Mercado Pago</h2>
+          <p>Elegir pagar ahora abre Checkout Pro. Pagar después reserva el lugar con deuda pendiente.</p>
           {registrationError ? <div className="form-alert">{registrationError}</div> : null}
-          <Button onClick={payMock} disabled={isBlocked || !selectedCategory}>Pagar inscripcion mock</Button>
+          {!payLaterAvailable ? <div className="form-alert">Pagar después ya no está disponible. Completá el pago para confirmar tu inscripción.</div> : null}
+          <div className="wizard-actions">
+            <Button variant="ghost" onClick={payLater} disabled={isBlocked || !selectedCategory || !payLaterAvailable}>Pagar después</Button>
+            <Button onClick={payNow} disabled={isBlocked || !selectedCategory}>Pagar ahora</Button>
+          </div>
         </Card>
       ) : null}
 
       {steps[stepIndex].id === "confirmed" ? (
         <Card className="payment-card">
           <CheckCircle2 size={42} />
-          <h2>Inscripcion confirmada</h2>
-          <p>Tu inscripcion mock quedo registrada para pruebas locales.</p>
+          <h2>Inscripción confirmada</h2>
+          <p>{createdEnrollment?.paymentStatus === "pending" ? "Tu lugar quedó reservado con pago pendiente." : "Tu inscripción quedó registrada."}</p>
           {createdEnrollment ? <Badge tone="success">{createdEnrollment.status}</Badge> : null}
+          {createdEnrollment?.paymentStatus === "pending" ? <Badge tone="danger">Pago pendiente</Badge> : null}
         </Card>
       ) : null}
 
       <div className="wizard-actions">
-        <Button variant="ghost" onClick={previous} disabled={stepIndex === 0}>Atras</Button>
+        <Button variant="ghost" onClick={previous} disabled={stepIndex === 0}>Atrás</Button>
         {stepIndex < steps.length - 1 && steps[stepIndex].id !== "payment" ? <Button onClick={next} disabled={isBlocked || (steps[stepIndex].id === "category" && !allowedCategories.length)}>Continuar</Button> : null}
       </div>
     </div>

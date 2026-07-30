@@ -33,7 +33,7 @@ export function AdminDashboardPage() {
         <div>
           <span className="eyebrow">Profesor / administrador</span>
           <h1>Resumen general</h1>
-          <p>Vista rapida del circuito, torneos activos y pendientes reales de gestion.</p>
+          <p>Vista rápida del circuito, torneos activos y pendientes reales de gestión.</p>
         </div>
       </header>
 
@@ -67,7 +67,7 @@ export function AdminDashboardPage() {
             ))}
           </div>
           <div className="info-band">
-            <strong>Inscripciones mock</strong>
+            <strong>Inscripciones</strong>
             <span>{enrollments.filter((registration) => registration.status === "Pendiente de pago").length} pendientes de pago y {enrollments.filter((registration) => registration.status === "Confirmada").length} confirmadas.</span>
           </div>
         </Card>

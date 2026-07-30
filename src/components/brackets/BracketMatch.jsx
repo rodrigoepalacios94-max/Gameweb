@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Badge } from "../common/Badge";
 
 function getCompactNote(note = "") {
+  if (!note) return "";
   if (note.includes("32avos")) return "32A";
   if (note.includes("Ganador preliminar")) return "PRE";
   if (note.includes("Perdedor")) return "PER";

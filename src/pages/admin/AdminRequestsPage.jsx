@@ -33,7 +33,7 @@ export function AdminRequestsPage() {
   return (
     <div className="page-stack">
       <header className="page-header page-header--wide">
-        <span className="eyebrow">Categorias</span>
+        <span className="eyebrow">Categorías</span>
         <h1>Solicitudes de descenso</h1>
         <p>Revision administrativa de cambios de categoria solicitados por jugadores.</p>
       </header>

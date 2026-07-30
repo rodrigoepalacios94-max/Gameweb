@@ -1,6 +1,6 @@
-import { mutateMockData, readMockData } from "../mocks/mockDatabase";
+import { createDataError, ensureSupabaseDataClient, logSupabaseDataError } from "./supabaseDataUtils";
+import { emailService } from "./emailService";
 import { ensureTournamentCategoryStages } from "./tournamentCategoryService";
-import { mockRequest } from "./serviceUtils";
 
 const DAY_CONFIG = {
   saturday: { label: "Sabado", courts: 3 },
@@ -16,6 +16,10 @@ const ROUND_PRIORITY = {
   "32avos": 34,
   Preliminar: 20,
 };
+const GAME_TIMEZONE = "America/Argentina/Buenos_Aires";
+const GAME_TIMEZONE_OFFSET = "-03:00";
+const PLAYABLE_DB_STATUSES = new Set(["pending", "scheduled", "suspended", "rescheduled"]);
+const BLOCKED_DB_STATUSES = new Set(["finished", "in_progress", "cancelled", "standby"]);
 
 function parseDate(date) {
   return new Date(`${date}T00:00:00`);
@@ -36,6 +40,268 @@ function weekendDates(startDate, offsetWeeks = 0) {
   const saturday = addDays(base, offsetWeeks * 7);
   const sunday = addDays(saturday, 1);
   return { saturday: toDateString(saturday), sunday: toDateString(sunday) };
+}
+
+function saturdayBeforeFinal(finalsDate) {
+  const finalDate = parseDate(finalsDate);
+  if (Number.isNaN(finalDate.getTime())) return "";
+  return toDateString(addDays(finalDate, -1));
+}
+
+function nextDefinitionWeekend(finalsDate) {
+  const finalDate = parseDate(finalsDate);
+  if (Number.isNaN(finalDate.getTime())) return { saturday: "", sunday: "" };
+  return {
+    saturday: toDateString(addDays(finalDate, 6)),
+    sunday: toDateString(addDays(finalDate, 7)),
+  };
+}
+
+function isSemifinalMatch(match) {
+  return String(match?.round || match?.phase || "").toLowerCase().includes("semifinal");
+}
+
+function isFinalMatch(match) {
+  const value = String(match?.round || match?.phase || "").toLowerCase();
+  return value === "final";
+}
+
+function fullName(player) {
+  return `${player?.first_name || ""} ${player?.last_name || ""}`.trim();
+}
+
+function dbCategoryLabel(row) {
+  const category = row?.tournament_categories?.categories || row?.categories;
+  return category ? `${category.name} ${category.branch || ""}`.trim() : "Categoria";
+}
+
+function localDateTimeParts(value) {
+  if (!value) return { date: "", time: "A definir" };
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return { date: "", time: "A definir" };
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone: GAME_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date).map((part) => [part.type, part.value]));
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    time: `${parts.hour}:${parts.minute}`,
+  };
+}
+
+function scheduledAtFromSlot(date, time) {
+  const normalizedTime = String(time || "00:00").length === 5 ? `${time}:00` : String(time || "00:00");
+  return new Date(`${date}T${normalizedTime}${GAME_TIMEZONE_OFFSET}`).toISOString();
+}
+
+function mapScheduleTournament(row) {
+  return row ? {
+    id: row.id,
+    name: row.name,
+    startDate: row.start_date,
+    semifinalsDate: row.semifinals_date,
+    finalsDate: row.finals_date || row.end_date,
+    schedule: row.schedule || {},
+    courtCapacity: row.court_capacity || {},
+    courts: row.courts || [],
+  } : null;
+}
+
+function mapScheduleStage(row) {
+  const category = row.categories;
+  return {
+    id: row.id,
+    categoryId: row.category_id,
+    categoryName: category ? `${category.name} ${category.branch || ""}`.trim() : "Categoria",
+  };
+}
+
+function mapScheduleMatch(row) {
+  const parts = localDateTimeParts(row.scheduled_at);
+  return {
+    id: row.id,
+    tournamentId: row.tournament_id,
+    tournamentCategoryId: row.tournament_category_id,
+    categoryId: row.tournament_categories?.category_id,
+    category: dbCategoryLabel(row),
+    round: row.round_name || row.phase || "Partido",
+    roundIndex: Number(row.round_index || 0),
+    bracketSlot: Number(row.bracket_slot || 0),
+    phase: row.phase,
+    status: row.status,
+    resultType: row.result_type,
+    playerAId: row.player1_id,
+    playerBId: row.player2_id,
+    playerA: fullName(row.player1) || "A definir",
+    playerB: fullName(row.player2) || "A definir",
+    scheduledAt: row.scheduled_at,
+    date: parts.date,
+    time: parts.time,
+    court: row.court || "A definir",
+    metadata: row.metadata || {},
+  };
+}
+
+async function fetchScheduleSeed(tournamentId) {
+  const client = ensureSupabaseDataClient();
+  const [{ data: tournament, error: tournamentError }, { data: stages, error: stagesError }, { data: matches, error: matchesError }] = await Promise.all([
+    client.from("tournaments").select("id, name, start_date, end_date, semifinals_date, finals_date, schedule, court_capacity, courts").eq("id", tournamentId).maybeSingle(),
+    client.from("tournament_categories").select("id, category_id, categories:category_id(id, name, branch)").eq("tournament_id", tournamentId),
+    client.from("matches").select(`
+      id,
+      tournament_id,
+      tournament_category_id,
+      phase,
+      round_name,
+      round_index,
+      bracket_slot,
+      status,
+      result_type,
+      player1_id,
+      player2_id,
+      scheduled_at,
+      court,
+      metadata,
+      tournament_categories:tournament_category_id (
+        id,
+        category_id,
+        categories:category_id (
+          id,
+          name,
+          branch
+        )
+      ),
+      player1:player1_id (
+        id,
+        first_name,
+        last_name
+      ),
+      player2:player2_id (
+        id,
+        first_name,
+        last_name
+      )
+    `).eq("tournament_id", tournamentId),
+  ]);
+  if (tournamentError) {
+    logSupabaseDataError("schedule tournament lookup", tournamentError);
+    throw createDataError("No pudimos cargar el torneo para programar.", { cause: tournamentError });
+  }
+  if (stagesError) {
+    logSupabaseDataError("schedule stages lookup", stagesError);
+    throw createDataError("No pudimos cargar las categorias para programar.", { cause: stagesError });
+  }
+  if (matchesError) {
+    logSupabaseDataError("schedule matches lookup", matchesError);
+    throw createDataError("No pudimos cargar los partidos para programar.", { cause: matchesError });
+  }
+  return {
+    tournament: mapScheduleTournament(tournament),
+    stages: (stages || []).map(mapScheduleStage),
+    matches: (matches || []).map(mapScheduleMatch),
+  };
+}
+
+function isDbPlayableMatch(match) {
+  if (!match?.playerAId || !match?.playerBId) return false;
+  if (match.resultType === "BYE") return false;
+  if (BLOCKED_DB_STATUSES.has(match.status)) return false;
+  return PLAYABLE_DB_STATUSES.has(match.status);
+}
+
+function hasScheduledConflict(scheduled, match, slot) {
+  const players = [match.playerAId, match.playerBId].filter(Boolean);
+  return scheduled.some((item) =>
+    item.date === slot.date &&
+    item.time === slot.time &&
+    players.some((playerId) => item.playerIds.includes(playerId))
+  );
+}
+
+function isCourtBusy(scheduled, slot) {
+  return scheduled.some((item) => item.date === slot.date && item.time === slot.time && item.court === slot.court);
+}
+
+function dbRoundPriority(match) {
+  return ROUND_PRIORITY[match.round] || 30;
+}
+
+function calculateDbCategoryWeights(matches, stages) {
+  const pendingByCategory = stages.map((stage) => ({
+    categoryId: stage.categoryId,
+    categoryName: stage.categoryName,
+    pending: matches.filter((match) => match.categoryId === stage.categoryId && isDbPlayableMatch(match)).length,
+  }));
+  const totalPending = pendingByCategory.reduce((total, item) => total + item.pending, 0) || 1;
+  return pendingByCategory.map((item) => ({ ...item, weight: item.pending / totalPending }));
+}
+
+function buildDbDistribution(matches, scheduledSlots, stages, weights) {
+  return stages.map((stage) => {
+    const pending = matches.filter((match) => match.categoryId === stage.categoryId && isDbPlayableMatch(match)).length;
+    const programmed = scheduledSlots.filter((slot) => slot.categoryId === stage.categoryId).length;
+    return {
+      categoryId: stage.categoryId,
+      categoryName: stage.categoryName,
+      pending,
+      programmed,
+      weight: weights.find((item) => item.categoryId === stage.categoryId)?.weight || 0,
+    };
+  });
+}
+
+function mapMatchToScheduleSlot(match) {
+  return {
+    id: `${match.scheduledAt || "slot"}-${match.id}`,
+    tournamentId: match.tournamentId,
+    matchId: match.id,
+    categoryId: match.categoryId,
+    category: match.category,
+    round: match.round,
+    playerIds: [match.playerAId, match.playerBId].filter(Boolean),
+    players: `${match.playerA} vs ${match.playerB}`,
+    weekend: "Programado",
+    date: match.date,
+    day: "",
+    time: match.time,
+    court: match.court,
+    load: "Programado automaticamente",
+  };
+}
+
+function getMultiWeekendSlots(tournament, startOffsetWeeks = 0, weekendCount = 10) {
+  return Array.from({ length: weekendCount }, (_, index) => getWeekendSlots(tournament, startOffsetWeeks + index)).flat();
+}
+
+async function updateScheduledMatches(assignments) {
+  if (!assignments.length) return;
+  const client = ensureSupabaseDataClient();
+  await Promise.all(assignments.map(async ({ match, slot }) => {
+    const { error } = await client
+      .from("matches")
+      .update({
+        scheduled_at: scheduledAtFromSlot(slot.date, slot.time),
+        court: slot.court,
+        status: "scheduled",
+        metadata: {
+          ...(match.metadata || {}),
+          schedule: {
+            source: "auto",
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      })
+      .eq("id", match.id);
+    if (error) {
+      logSupabaseDataError("schedule match update", error);
+      throw createDataError("No pudimos guardar la programacion automatica.", { cause: error });
+    }
+  }));
 }
 
 function isPlayableMatch(match) {
@@ -228,202 +494,207 @@ export function generateWeekendScheduleInDb(db, tournamentId, weekendOffset = 0)
   };
 }
 
-function clearMatchSchedule(match) {
-  Object.assign(match, {
-    date: "",
-    time: "A definir",
-    court: "A definir",
-  });
-}
-
-function makeStressPlayer(categoryId, categoryName, index) {
-  return {
-    id: `stress-${categoryId}-${index}`,
-    firstName: "Stress",
-    lastName: `${categoryName}-${index}`,
-    fullName: `Stress ${categoryName} ${index}`,
-    categoryId,
-    categoryName,
-    ranking: index,
-    points: 0,
-    status: "Activo",
-    avatar: "",
-    discipline: { faults: 0, limit: 3, status: "Sin sanciones" },
-    isSchedulingStress: true,
-  };
-}
-
-function createStressMatches(db, tournament, stage, count, sharedPlayer = null) {
-  const matches = [];
-  for (let index = 0; index < count; index += 1) {
-    const playerA = sharedPlayer && index === 0 ? sharedPlayer : makeStressPlayer(stage.categoryId, stage.categoryName, index * 2 + 1);
-    const playerB = makeStressPlayer(stage.categoryId, stage.categoryName, index * 2 + 2);
-    [playerA, playerB].forEach((player) => {
-      if (!db.players.some((item) => item.id === player.id)) db.players.push(player);
-      if (!stage.participants.includes(player.id)) stage.participants.push(player.id);
-    });
-    const match = {
-      id: `stress-match-${stage.categoryId}-${index + 1}`,
-      tournamentId: tournament.id,
-      categoryId: stage.categoryId,
-      tournament: tournament.name,
-      category: stage.categoryName,
-      round: index < 2 ? "Semifinal" : index < 4 ? "Cuartos" : "Preliminar",
-      phase: index < 4 ? "Cuadro principal" : "Preliminar",
-      playerAId: playerA.id,
-      playerA: playerA.fullName,
-      playerAAvatar: playerA.avatar,
-      playerBId: playerB.id,
-      playerB: playerB.fullName,
-      playerBAvatar: playerB.avatar,
-      opponentId: playerB.id,
-      opponent: playerB.fullName,
-      opponentAvatar: playerB.avatar,
-      date: "",
-      time: "A definir",
-      court: "A definir",
-      status: "Listo para programar",
-      result: null,
-      sets: [],
-      winnerId: null,
-      discipline: { claims: [], confirmedFaults: [] },
-      isSchedulingStress: true,
-    };
-    matches.push(match);
-    [playerA.id, playerB.id].forEach((playerId) => {
-      db.matchAvailability.push({
-        matchId: match.id,
-        tournamentId: tournament.id,
-        categoryId: stage.categoryId,
-        playerId,
-        confirmed: true,
-        unavailableSlots: index === 0 && playerId === playerA.id ? ["2026-10-03 10:00"] : [],
-        submittedAt: "2026-09-30T10:00:00.000Z",
-      });
-    });
-  }
-  db.matches.push(...matches);
-}
-
-function createStressScenarioInDb(db) {
-  const tournamentId = "stress-40-20-10";
-  db.tournaments = db.tournaments.filter((item) => item.id !== tournamentId);
-  db.matches = db.matches.filter((item) => item.tournamentId !== tournamentId);
-  db.schedule = db.schedule.filter((item) => item.tournamentId !== tournamentId);
-  db.matchAvailability = (db.matchAvailability || []).filter((item) => item.tournamentId !== tournamentId);
-
-  const stages = [
-    { categoryId: "cat-m2", categoryName: "2a Masculino", format: "Preliminar", participants: [], inscriptionsCount: 80, bracketKey: `${tournamentId}::cat-m2`, status: "En programacion" },
-    { categoryId: "cat-m3", categoryName: "3a Masculino", format: "Eliminacion Directa", participants: [], inscriptionsCount: 40, bracketKey: `${tournamentId}::cat-m3`, status: "En programacion" },
-    { categoryId: "cat-f4", categoryName: "4a Femenino", format: "Zonas", participants: [], inscriptionsCount: 20, bracketKey: `${tournamentId}::cat-f4`, status: "En programacion" },
-  ];
-  const tournament = {
-    id: tournamentId,
-    name: "DEV Programacion 40/20/10",
-    description: "Escenario mock de distribucion proporcional.",
-    startDate: "2026-10-03",
-    semifinalsDate: "2026-10-10",
-    finalsDate: "2026-10-11",
-    status: "En programacion",
-    type: "Formato por categoria",
-    scoringSystem: "GAME 1000",
-    matchFormat: { bestOfSets: 3, gamesPerSet: 6, useSuperTiebreak: true, superTiebreakInDecidingSet: true },
-    price: 0,
-    categories: stages.map((stage) => stage.categoryId),
-    categoryStages: stages,
-    playerCategoryId: "cat-m2",
-    playerCategoryName: "2a Masculino",
-    courts: ["Cancha 1", "Cancha 2", "Cancha 3", "Cancha 4"],
-    schedule: { saturday: ["10:00", "12:00", "14:00", "16:00"], sunday: ["09:00", "11:00", "13:00"] },
-    courtCapacity: { saturday: 3, sunday: 4 },
-    participants: [],
-    phases: ["Preliminar", "Cuadro principal"],
-    isSchedulingStress: true,
-  };
-  db.tournaments.push(tournament);
-
-  const sharedPlayer = makeStressPlayer("cat-m2", "2a Masculino", 999);
-  sharedPlayer.id = "stress-shared-player";
-  sharedPlayer.fullName = "Stress Doble Categoria";
-  createStressMatches(db, tournament, stages[0], 40, sharedPlayer);
-  createStressMatches(db, tournament, stages[1], 20, sharedPlayer);
-  createStressMatches(db, tournament, stages[2], 10);
-  tournament.participants = [...new Set(stages.flatMap((stage) => stage.participants))];
-  const generated = generateWeekendScheduleInDb(db, tournamentId, 0);
-  return { tournament, generated };
-}
-
 export const schedulingService = {
   async getScheduleByTournament(tournamentId) {
-    return mockRequest(() => readMockData((db) => {
-      const tournament = db.tournaments.find((item) => item.id === tournamentId);
-      const stages = ensureTournamentCategoryStages(db, tournament);
-      const matches = db.matches.filter((match) => match.tournamentId === tournamentId);
-      const weights = calculateCategoryWeights(matches, stages);
-      const progress = calculateCategoryProgress(matches, stages);
-      return {
-        slots: db.schedule.filter((slot) => slot.tournamentId === tournamentId),
-        distribution: tournament?.scheduleSummary || buildDistribution(matches, db.schedule.filter((slot) => slot.tournamentId === tournamentId), stages, weights),
-        weights,
-        progress,
-        events: ensureScheduleMeta(db).filter((event) => event.tournamentId === tournamentId),
-      };
-    }), "No pudimos cargar programacion dinamica.");
+    const { stages, matches } = await fetchScheduleSeed(tournamentId);
+    const weights = calculateDbCategoryWeights(matches, stages);
+    const slots = matches
+      .filter((match) => match.scheduledAt)
+      .sort((a, b) =>
+        String(a.date).localeCompare(String(b.date)) ||
+        String(a.time).localeCompare(String(b.time)) ||
+        String(a.court).localeCompare(String(b.court), undefined, { numeric: true })
+      )
+      .map(mapMatchToScheduleSlot);
+    return {
+      slots,
+      distribution: buildDbDistribution(matches, slots, stages, weights),
+      weights,
+      progress: [],
+      events: [],
+    };
   },
-  async recalculateSchedule(tournamentId) {
-    return mockRequest(() => mutateMockData((db) => generateWeekendScheduleInDb(db, tournamentId, 0)), "No pudimos recalcular programacion.");
+  async recalculateSchedule(tournamentId, { preserveScheduled = true, startOffsetWeeks = 0, weekendCount = 10, startDateOverride = null, slotFilter = null } = {}) {
+    const { tournament, stages, matches } = await fetchScheduleSeed(tournamentId);
+    if (!tournament) throw createDataError("No encontramos el torneo para programar.");
+    const scheduleTournament = startDateOverride ? { ...tournament, startDate: startDateOverride } : tournament;
+    const weights = calculateDbCategoryWeights(matches, stages);
+    const fixedScheduled = preserveScheduled
+      ? matches.filter((match) => match.scheduledAt && match.status === "scheduled").map(mapMatchToScheduleSlot)
+      : [];
+    const candidates = matches
+      .filter(isDbPlayableMatch)
+      .filter((match) => !(preserveScheduled && match.scheduledAt && match.status === "scheduled"))
+      .sort((a, b) => dbRoundPriority(b) - dbRoundPriority(a) || a.roundIndex - b.roundIndex || a.bracketSlot - b.bracketSlot);
+    const scheduled = [...fixedScheduled];
+    const assignments = [];
+    const slots = getMultiWeekendSlots(scheduleTournament, startOffsetWeeks, weekendCount)
+      .filter((slot) => (typeof slotFilter === "function" ? slotFilter(slot) : true));
+
+    for (const match of candidates) {
+      const slot = slots.find((item) => !isCourtBusy(scheduled, item) && !hasScheduledConflict(scheduled, match, item));
+      if (!slot) continue;
+      scheduled.push({
+        id: `${slot.id}-${match.id}`,
+        tournamentId,
+        matchId: match.id,
+        categoryId: match.categoryId,
+        category: match.category,
+        round: match.round,
+        playerIds: [match.playerAId, match.playerBId].filter(Boolean),
+        players: `${match.playerA} vs ${match.playerB}`,
+        weekend: slot.weekend,
+        date: slot.date,
+        day: slot.day,
+        time: slot.time,
+        court: slot.court,
+        load: "Asignado automaticamente por categoria y disponibilidad de cancha",
+      });
+      assignments.push({ match, slot });
+    }
+
+    await updateScheduledMatches(assignments);
+    const refreshed = await this.getScheduleByTournament(tournamentId);
+    return {
+      ...refreshed,
+      scheduledCount: assignments.length,
+      unscheduledCount: candidates.length - assignments.length,
+      distribution: buildDbDistribution(matches, scheduled, stages, weights),
+    };
   },
   async suspendMatch(matchId, reason = "Suspension administrativa") {
-    return mockRequest(() => mutateMockData((db) => {
-      const match = db.matches.find((item) => item.id === matchId);
-      if (!match || match.status === "Finalizado") return null;
-      const previousSlot = { date: match.date, time: match.time, court: match.court };
-      match.status = "Suspendido";
-      match.suspensionReason = reason;
-      clearMatchSchedule(match);
-      db.schedule = db.schedule.filter((slot) => slot.matchId !== matchId);
-      ensureScheduleMeta(db).push({ tournamentId: match.tournamentId, type: "match", reason, matchId, previousSlot, createdAt: new Date().toISOString() });
-      const recalculated = generateWeekendScheduleInDb(db, match.tournamentId, 0);
-      return { match, previousSlot, recalculated };
-    }), "No pudimos suspender partido.");
+    const client = ensureSupabaseDataClient();
+    const { data: match, error: lookupError } = await client
+      .from("matches")
+      .select("id, tournament_id, status, scheduled_at, court, metadata")
+      .eq("id", matchId)
+      .maybeSingle();
+    if (lookupError) {
+      logSupabaseDataError("suspend match lookup", lookupError);
+      throw createDataError("No pudimos cargar el partido a suspender.", { cause: lookupError });
+    }
+    if (!match || BLOCKED_DB_STATUSES.has(match.status)) return null;
+    const previousSlot = { scheduledAt: match.scheduled_at, court: match.court };
+    const { error } = await client
+      .from("matches")
+      .update({
+        status: "rescheduled",
+        scheduled_at: null,
+        court: null,
+        metadata: {
+          ...(match.metadata || {}),
+          suspension: { type: "match", reason, previousSlot, createdAt: new Date().toISOString() },
+        },
+      })
+      .eq("id", matchId);
+    if (error) {
+      logSupabaseDataError("suspend match update", error);
+      throw createDataError("No pudimos suspender el partido.", { cause: error });
+    }
+    const recalculated = { slots: [], scheduledCount: 0, unscheduledCount: 1, requiresAvailability: true };
+    emailService.processQueuedGameEmails("match_suspended");
+    return { match, previousSlot, recalculated };
   },
   async suspendDay(tournamentId, date, fromTime = null, reason = "Suspension de jornada") {
-    return mockRequest(() => mutateMockData((db) => {
-      const suspendedMatches = db.matches.filter((match) =>
-        match.tournamentId === tournamentId &&
-        match.date === date &&
-        match.status !== "Finalizado" &&
-        (!fromTime || match.time >= fromTime),
-      );
-      suspendedMatches.forEach((match) => {
-        match.status = "Reprogramado";
-        match.suspensionReason = reason;
-        clearMatchSchedule(match);
-      });
-      db.schedule = db.schedule.filter((slot) => !(slot.tournamentId === tournamentId && slot.date === date && (!fromTime || slot.time >= fromTime)));
-      ensureScheduleMeta(db).push({ tournamentId, type: fromTime ? "partial-day" : "day", date, fromTime, reason, createdAt: new Date().toISOString() });
-      const recalculated = generateWeekendScheduleInDb(db, tournamentId, 1);
-      return { suspendedMatches, recalculated };
-    }), "No pudimos suspender jornada.");
+    const { tournament, matches } = await fetchScheduleSeed(tournamentId);
+    const suspendedMatches = matches.filter((match) =>
+      match.date === date &&
+      !BLOCKED_DB_STATUSES.has(match.status) &&
+      (!fromTime || match.time >= fromTime)
+    );
+    const client = ensureSupabaseDataClient();
+    await Promise.all(suspendedMatches.map(async (match) => {
+      const previousSlot = { scheduledAt: match.scheduledAt, date: match.date, time: match.time, court: match.court };
+      const { error } = await client
+        .from("matches")
+        .update({
+          status: "rescheduled",
+          scheduled_at: null,
+          court: null,
+          metadata: {
+            ...(match.metadata || {}),
+            suspension: { type: fromTime ? "partial-day" : "day", date, fromTime, reason, previousSlot, createdAt: new Date().toISOString() },
+          },
+        })
+        .eq("id", match.id);
+      if (error) {
+        logSupabaseDataError("suspend day match update", error);
+        throw createDataError("No pudimos suspender la jornada.", { cause: error });
+      }
+    }));
+    const hasSuspendedSemifinal = suspendedMatches.some(isSemifinalMatch);
+    let recalculated = { slots: [], scheduledCount: 0, unscheduledCount: suspendedMatches.length, requiresAvailability: true };
+    if (hasSuspendedSemifinal && tournament?.finalsDate) {
+      const semifinalSaturday = saturdayBeforeFinal(tournament.finalsDate);
+      const updateSemifinalDate = async (semifinalsDate, finalsDate = tournament.finalsDate) => {
+        const { error } = await client
+          .from("tournaments")
+          .update({ semifinals_date: semifinalsDate, finals_date: finalsDate, end_date: finalsDate })
+          .eq("id", tournamentId);
+        if (error) {
+          logSupabaseDataError("suspend day tournament definition dates update", error);
+          throw createDataError("No pudimos actualizar las fechas de definicion.", { cause: error });
+        }
+      };
+
+      await updateSemifinalDate(semifinalSaturday);
+      recalculated = {
+        ...recalculated,
+        semifinalsDate: semifinalSaturday,
+        finalsDate: tournament.finalsDate,
+      };
+    }
+    emailService.processQueuedGameEmails("day_suspended");
+    return { suspendedMatches, recalculated };
   },
   async suspendWeekend(tournamentId, startDate, reason = "Suspension de fin de semana") {
-    return mockRequest(() => mutateMockData((db) => {
-      const start = parseDate(startDate);
-      const dates = [toDateString(start), toDateString(addDays(start, 1))];
-      const suspendedMatches = db.matches.filter((match) => match.tournamentId === tournamentId && dates.includes(match.date) && match.status !== "Finalizado");
-      suspendedMatches.forEach((match) => {
-        match.status = "Reprogramado";
-        match.suspensionReason = reason;
-        clearMatchSchedule(match);
-      });
-      db.schedule = db.schedule.filter((slot) => !(slot.tournamentId === tournamentId && dates.includes(slot.date)));
-      ensureScheduleMeta(db).push({ tournamentId, type: "weekend", dates, reason, createdAt: new Date().toISOString() });
-      const recalculated = generateWeekendScheduleInDb(db, tournamentId, 1);
-      return { suspendedMatches, recalculated };
-    }), "No pudimos suspender fin de semana.");
+    const start = parseDate(startDate);
+    const dates = [toDateString(start), toDateString(addDays(start, 1))];
+    const { tournament, matches } = await fetchScheduleSeed(tournamentId);
+    const suspendedMatches = matches.filter((match) => dates.includes(match.date) && !BLOCKED_DB_STATUSES.has(match.status));
+    const client = ensureSupabaseDataClient();
+    await Promise.all(suspendedMatches.map(async (match) => {
+      const previousSlot = { scheduledAt: match.scheduledAt, date: match.date, time: match.time, court: match.court };
+      const { error } = await client
+        .from("matches")
+        .update({
+          status: "rescheduled",
+          scheduled_at: null,
+          court: null,
+          metadata: {
+            ...(match.metadata || {}),
+            suspension: { type: "weekend", dates, reason, previousSlot, createdAt: new Date().toISOString() },
+          },
+        })
+        .eq("id", match.id);
+      if (error) {
+        logSupabaseDataError("suspend weekend match update", error);
+        throw createDataError("No pudimos suspender el fin de semana.", { cause: error });
+      }
+    }));
+    const definitionSaturday = tournament?.finalsDate ? saturdayBeforeFinal(tournament.finalsDate) : "";
+    const affectsDefinition = suspendedMatches.some(isFinalMatch) ||
+      (suspendedMatches.some(isSemifinalMatch) && dates.includes(definitionSaturday) && dates.includes(tournament?.finalsDate));
+    const nextWeekend = affectsDefinition && tournament?.finalsDate ? nextDefinitionWeekend(tournament.finalsDate) : null;
+    if (nextWeekend?.saturday && nextWeekend?.sunday) {
+      await client
+        .from("tournaments")
+        .update({ semifinals_date: nextWeekend.saturday, finals_date: nextWeekend.sunday, end_date: nextWeekend.sunday })
+        .eq("id", tournamentId);
+    }
+    const recalculated = {
+      slots: [],
+      scheduledCount: 0,
+      unscheduledCount: suspendedMatches.length,
+      requiresAvailability: true,
+      semifinalsDate: nextWeekend?.saturday || null,
+      finalsDate: nextWeekend?.sunday || null,
+    };
+    emailService.processQueuedGameEmails("weekend_suspended");
+    return { suspendedMatches, recalculated };
   },
   async createSchedulingStressScenario() {
-    return mockRequest(() => mutateMockData((db) => createStressScenarioInDb(db)), "No pudimos crear escenario de programacion.");
+    throw createDataError("El escenario de programacion de prueba no esta disponible en el flujo real.");
   },
   calculateCategoryWeights,
   calculateCategoryProgress,

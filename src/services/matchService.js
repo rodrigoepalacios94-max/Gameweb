@@ -1,21 +1,84 @@
-import { createMockId, mutateMockData, readMockData } from "../mocks/mockDatabase";
 import { DEFAULT_MATCH_FORMAT, formatResultSets, getSetsToWin, isDecidingSuperTiebreak, normalizeMatchFormat } from "../utils/matchFormat";
 import { auditService } from "./auditService";
-import { mockRequest } from "./serviceUtils";
-import { buildPreliminaryBracketFromResults, ensureTournamentCategoryStages } from "./tournamentCategoryService";
+import { createDataError, ensureSupabaseDataClient, logSupabaseDataError } from "./supabaseDataUtils";
 
-function getTournament(db, tournamentId) {
-  return db.tournaments.find((tournament) => tournament.id === tournamentId) || null;
-}
+const matchSelect = `
+  id,
+  tournament_id,
+  tournament_category_id,
+  bracket_id,
+  zone_id,
+  phase,
+  round_name,
+  round_index,
+  bracket_slot,
+  status,
+  player1_id,
+  player2_id,
+  winner_id,
+  loser_id,
+  result_type,
+  result_text,
+  result_detail,
+  scheduled_at,
+  court,
+  logical_side,
+  tree_slot_start,
+  tree_slot_span,
+  tree_round_index,
+  stage_path,
+  metadata,
+  created_at,
+  updated_at,
+  tournaments:tournament_id (
+    id,
+    name,
+    match_format
+  ),
+  tournament_categories:tournament_category_id (
+    id,
+    category_id,
+    match_format,
+    categories:category_id (
+      id,
+      name,
+      branch
+    )
+  ),
+  player1:player1_id (
+    id,
+    first_name,
+    last_name,
+    avatar_url
+  ),
+  player2:player2_id (
+    id,
+    first_name,
+    last_name,
+    avatar_url
+  ),
+  match_sets (
+    set_number,
+    player1_score,
+    player2_score,
+    set_type
+  )
+`;
 
-function withTournamentFormat(db, match) {
-  if (!match) return null;
-  const tournament = getTournament(db, match.tournamentId);
-  const categoryStage = tournament ? ensureTournamentCategoryStages(db, tournament).find((stage) => stage.categoryId === match.categoryId) : null;
-  return {
-    ...match,
-    matchFormat: normalizeMatchFormat(categoryStage?.matchFormat || tournament?.matchFormat || match.matchFormat || DEFAULT_MATCH_FORMAT),
-  };
+const statusFromDb = {
+  pending: "Pendiente",
+  scheduled: "Programado",
+  in_progress: "En juego",
+  finished: "Finalizado",
+  cancelled: "Cancelado",
+  suspended: "Suspendido",
+  paused: "Pausado",
+  rescheduled: "Reprogramado",
+  standby: "Doble W.O.",
+};
+
+function fullName(player) {
+  return `${player?.first_name || ""} ${player?.last_name || ""}`.trim();
 }
 
 function normalizeScoreSet(set, index, format) {
@@ -80,413 +143,279 @@ export function calculateMatchWinner({ playerAId, playerBId, sets = [], matchFor
   };
 }
 
-function getCompletedSets(sets = [], matchFormat = DEFAULT_MATCH_FORMAT) {
-  return sets
-    .filter((set) => set.playerAScore !== "" && set.playerAScore != null && set.playerBScore !== "" && set.playerBScore != null)
-    .map((set, index) => normalizeScoreSet(set, index, matchFormat));
+function dbSetsToUi(sets = []) {
+  return [...sets]
+    .sort((a, b) => Number(a.set_number || 0) - Number(b.set_number || 0))
+    .map((set) => ({
+      type: set.set_type,
+      playerAScore: Number(set.player1_score || 0),
+      playerBScore: Number(set.player2_score || 0),
+      a: Number(set.player1_score || 0),
+      b: Number(set.player2_score || 0),
+      superTieBreak: set.set_type === "super_tiebreak",
+    }));
 }
 
-function calculateRelaxedSetScore(sets = []) {
-  return sets.reduce((score, set) => {
-    if (!Number.isFinite(set.playerAScore) || !Number.isFinite(set.playerBScore) || set.playerAScore === set.playerBScore) return score;
-    if (set.playerAScore > set.playerBScore) return { ...score, playerASets: score.playerASets + 1 };
-    return { ...score, playerBSets: score.playerBSets + 1 };
-  }, { playerASets: 0, playerBSets: 0 });
+function uiSetsToDb(sets = []) {
+  return sets.map((set, index) => ({
+    setNumber: index + 1,
+    player1Score: Number(set.playerAScore ?? set.a ?? 0),
+    player2Score: Number(set.playerBScore ?? set.b ?? 0),
+    type: set.type || (set.superTieBreak ? "super_tiebreak" : "set"),
+  }));
 }
 
-function buildEarlyFinishResult(target, sets, matchFormat, earlyFinishReason, manualWinnerId) {
-  const completedSets = getCompletedSets(sets, matchFormat);
-  const strictResult = calculateMatchWinner({ ...target, sets: completedSets, matchFormat });
-  const relaxedScore = calculateRelaxedSetScore(completedSets);
-  const selectedWinnerId = strictResult.valid ? strictResult.winnerId : manualWinnerId;
-  const validWinnerIds = [target.playerAId, target.playerBId];
+function categoryLabel(row) {
+  const category = row.tournament_categories?.categories;
+  return category ? `${category.name} ${category.branch}` : "";
+}
 
-  if (!earlyFinishReason?.trim()) {
-    throw new Error("Indica el motivo de finalizacion anticipada.");
-  }
-  if (!validWinnerIds.includes(selectedWinnerId)) {
-    throw new Error("Selecciona el ganador del partido finalizado anticipadamente.");
-  }
-
+function mapMatch(row) {
+  if (!row) return null;
+  const playerA = fullName(row.player1);
+  const playerB = row.result_type === "BYE" ? "BYE" : fullName(row.player2);
+  const sets = dbSetsToUi(row.match_sets || []);
+  const matchFormat = normalizeMatchFormat(row.tournament_categories?.match_format || row.tournaments?.match_format || DEFAULT_MATCH_FORMAT);
+  const status = row.result_type === "WO" ? "W.O." : row.result_type === "DOUBLE_WO" ? "Doble W.O." : statusFromDb[row.status] || row.status;
   return {
-    valid: true,
-    completedEarly: true,
-    earlyFinishReason: earlyFinishReason.trim(),
-    manualWinnerId: strictResult.valid ? null : selectedWinnerId,
-    sets: completedSets,
-    playerASets: strictResult.valid ? strictResult.playerASets : relaxedScore.playerASets,
-    playerBSets: strictResult.valid ? strictResult.playerBSets : relaxedScore.playerBSets,
-    winnerId: selectedWinnerId,
-    loserId: selectedWinnerId === target.playerAId ? target.playerBId : target.playerAId,
+    id: row.id,
+    tournamentId: row.tournament_id,
+    tournament: row.tournaments?.name || "",
+    categoryId: row.tournament_categories?.category_id,
+    category: categoryLabel(row),
+    tournamentCategoryId: row.tournament_category_id,
+    bracketId: row.bracket_id,
+    zoneId: row.zone_id,
+    round: row.round_name || row.phase,
+    phase: row.phase,
+    playerAId: row.player1_id,
+    playerA: playerA || "A definir",
+    playerAAvatar: row.player1?.avatar_url,
+    playerBId: row.player2_id,
+    playerB: playerB || "A definir",
+    playerBAvatar: row.player2?.avatar_url,
+    opponentId: row.player2_id,
+    opponent: playerB || "A definir",
+    opponentAvatar: row.player2?.avatar_url,
+    date: row.scheduled_at ? String(row.scheduled_at).slice(0, 10) : "",
+    time: row.scheduled_at ? new Date(row.scheduled_at).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }) : "A definir",
+    court: row.court || "A definir",
+    status,
+    result: row.result_text || (sets.length ? formatResultSets(sets) : null),
+    resultDetail: row.result_detail || null,
+    sets,
+    winnerId: row.winner_id,
+    loserId: row.loser_id,
+    walkoverPlayerId: row.result_type === "WO" ? row.loser_id : null,
+    doubleWalkover: row.result_type === "DOUBLE_WO",
+    bye: row.result_type === "BYE",
+    matchFormat,
+    metadata: row.metadata || {},
   };
 }
 
-function playerPayload(match, side) {
-  return side === "A"
-    ? { id: match.playerAId, name: match.playerA, avatar: match.playerAAvatar }
-    : { id: match.playerBId, name: match.playerB, avatar: match.playerBAvatar };
-}
-
-function winnerPayload(match) {
-  if (match.winnerId === match.playerAId) return playerPayload(match, "A");
-  if (match.winnerId === match.playerBId) return playerPayload(match, "B");
-  return null;
-}
-
-function updateBracketMatchFromMatch(bracketMatch, match) {
-  bracketMatch.matchId = match.id;
-  bracketMatch.playerA = match.playerA;
-  bracketMatch.playerB = match.playerB;
-  bracketMatch.playerAId = match.playerAId;
-  bracketMatch.playerBId = match.playerBId;
-  bracketMatch.score = match.result || "Pendiente";
-  bracketMatch.winner = match.winnerId === match.playerAId ? match.playerA : match.winnerId === match.playerBId ? match.playerB : null;
-  bracketMatch.walkover = match.status === "W.O." || match.status === "Doble W.O.";
-  bracketMatch.doubleWalkover = match.status === "Doble W.O.";
-}
-
-function assignPlayerToBracketSlot(bracketMatch, side, player) {
-  if (!player) return;
-  if (side === "A") {
-    bracketMatch.playerA = player.name;
-    bracketMatch.playerAId = player.id;
-    bracketMatch.playerAAvatar = player.avatar;
-  } else {
-    bracketMatch.playerB = player.name;
-    bracketMatch.playerBId = player.id;
-    bracketMatch.playerBAvatar = player.avatar;
+async function fetchMatches(applyFilters) {
+  const client = ensureSupabaseDataClient();
+  let query = client.from("matches").select(matchSelect);
+  query = applyFilters ? applyFilters(query) : query;
+  const { data, error } = await query.order("round_index", { ascending: true }).order("bracket_slot", { ascending: true });
+  if (error) {
+    logSupabaseDataError("matches fetch", error);
+    throw createDataError("No pudimos cargar los partidos.", { cause: error });
   }
+  return (data || []).map(mapMatch);
 }
 
-function createMatchFromBracket(db, tournament, round, bracketMatch) {
-  if (bracketMatch.matchId || (!bracketMatch.playerAId && !bracketMatch.playerBId) || bracketMatch.playerB === "BYE") return null;
-  const categoryStage = ensureTournamentCategoryStages(db, tournament).find((stage) => stage.categoryName === tournament.playerCategoryName || stage.categoryId === bracketMatch.categoryId) || ensureTournamentCategoryStages(db, tournament)[0];
-  const id = createMockId("match");
-  const match = {
-    id,
-    tournamentId: tournament.id,
-    tournament: tournament.name,
-    categoryId: categoryStage?.categoryId || tournament.playerCategoryId,
-    category: categoryStage?.categoryName || tournament.playerCategoryName,
-    round: round.name,
-    phase: round.name === "Preliminar" ? "Preliminar" : "Cuadro principal",
-    playerAId: bracketMatch.playerAId,
-    playerA: bracketMatch.playerA || "A definir",
-    playerAAvatar: bracketMatch.playerAAvatar,
-    playerBId: bracketMatch.playerBId,
-    playerB: bracketMatch.playerBId ? bracketMatch.playerB : "A definir",
-    playerBAvatar: bracketMatch.playerBAvatar,
-    opponentId: bracketMatch.playerBId || null,
-    opponent: bracketMatch.playerBId ? bracketMatch.playerB : "A definir",
-    opponentAvatar: bracketMatch.playerBAvatar,
-    date: tournament.startDate,
-    time: "A definir",
-    court: "A definir",
-    status: "Pendiente de asistencia",
-    attendanceStatus: {
-      ...(bracketMatch.playerAId ? { [bracketMatch.playerAId]: "Pendiente" } : {}),
-      ...(bracketMatch.playerBId ? { [bracketMatch.playerBId]: "Pendiente" } : {}),
-    },
-    result: null,
-    resultDetail: null,
-    sets: [],
-    winnerId: null,
-    loserId: null,
-    pointsEarned: 0,
-    discipline: { claims: [], confirmedFaults: [] },
-    isDevTest: Boolean(tournament.isDevTest),
-  };
-  db.matches.push(match);
-  bracketMatch.matchId = id;
-  return match;
-}
-
-function syncExistingMatchFromBracket(db, bracketMatch) {
-  if (!bracketMatch.matchId) return null;
-  const target = db.matches.find((item) => item.id === bracketMatch.matchId);
-  if (!target) return null;
-  const previousPlayerIds = [target.playerAId, target.playerBId].filter(Boolean);
-  Object.assign(target, {
-    playerAId: bracketMatch.playerAId,
-    playerA: bracketMatch.playerA || "A definir",
-    playerAAvatar: bracketMatch.playerAAvatar,
-    playerBId: bracketMatch.playerBId,
-    playerB: bracketMatch.playerBId ? bracketMatch.playerB : "A definir",
-    playerBAvatar: bracketMatch.playerBAvatar,
-    opponentId: bracketMatch.playerBId || null,
-    opponent: bracketMatch.playerBId ? bracketMatch.playerB : "A definir",
-    opponentAvatar: bracketMatch.playerBAvatar,
-  });
-  const currentPlayerIds = [target.playerAId, target.playerBId].filter(Boolean);
-  target.attendanceStatus = {
-    ...(target.attendanceStatus || {}),
-    ...Object.fromEntries(currentPlayerIds.filter((playerId) => !previousPlayerIds.includes(playerId)).map((playerId) => [playerId, "Pendiente"])),
-  };
-  if (target.status === "Pendiente" && currentPlayerIds.length) target.status = "Pendiente de asistencia";
-  return target;
-}
-
-function clearDownstreamIfNeeded(nextMatch, winner) {
-  if (!winner) return;
-  if (nextMatch.winner && nextMatch.winner !== winner.name) {
-    nextMatch.score = "Pendiente";
-    nextMatch.winner = null;
-    nextMatch.walkover = false;
-    nextMatch.doubleWalkover = false;
+async function fetchMatchById(id) {
+  const client = ensureSupabaseDataClient();
+  const { data, error } = await client.from("matches").select(matchSelect).eq("id", id).maybeSingle();
+  if (error) {
+    logSupabaseDataError("match by id", error);
+    throw createDataError("No pudimos cargar el partido.", { cause: error });
   }
-}
-
-function advanceBracketWinner(db, match) {
-  const tournament = getTournament(db, match.tournamentId);
-  const categoryStage = tournament ? ensureTournamentCategoryStages(db, tournament).find((stage) => stage.categoryId === match.categoryId) : null;
-  const bracket = categoryStage ? db.brackets[categoryStage.bracketKey] : db.brackets[match.tournamentId];
-  if (!bracket || !tournament) return;
-
-  bracket.preliminaries = (bracket.preliminaries || []).map((preliminary) => {
-    if (preliminary.matchId !== match.id) return preliminary;
-    return {
-      ...preliminary,
-      status: match.status,
-      result: match.result,
-      winner: match.winnerId === match.playerAId ? match.playerA : match.winnerId === match.playerBId ? match.playerB : null,
-    };
-  });
-
-  const rounds = bracket.rounds || [];
-  for (let roundIndex = 0; roundIndex < rounds.length; roundIndex += 1) {
-    const round = rounds[roundIndex];
-    const matchIndex = round.matches.findIndex((item) => item.matchId === match.id);
-    if (matchIndex < 0) continue;
-
-    const bracketMatch = round.matches[matchIndex];
-    updateBracketMatchFromMatch(bracketMatch, match);
-
-    const winner = winnerPayload(match);
-    if (!winner) return;
-
-    const nextRound = rounds[roundIndex + 1];
-    if (!nextRound) return;
-
-    const isRoundOf32 = round.id?.includes("32") || round.name?.includes("32");
-    const nextMatchIndex = isRoundOf32 && nextRound.matches.length > 1
-      ? matchIndex === 0 ? 0 : nextRound.matches.length - 1
-      : Math.floor(matchIndex / 2);
-    const nextMatch = nextRound.matches[nextMatchIndex];
-    if (!nextMatch) return;
-
-    const targetSide = isRoundOf32 ? "B" : matchIndex % 2 === 0 ? "A" : "B";
-    assignPlayerToBracketSlot(nextMatch, targetSide, winner);
-    clearDownstreamIfNeeded(nextMatch, winner);
-    nextMatch.categoryId = match.categoryId;
-    if (nextMatch.matchId) {
-      syncExistingMatchFromBracket(db, nextMatch);
-      return;
-    }
-    createMatchFromBracket(db, tournament, nextRound, nextMatch);
-    return;
-  }
-}
-
-function calculatePreliminaryPerformance(result, winnerId, match) {
-  const winnerGames = result.sets.reduce((total, set) => total + (winnerId === match.playerAId ? set.playerAScore : set.playerBScore), 0);
-  const loserGames = result.sets.reduce((total, set) => total + (winnerId === match.playerAId ? set.playerBScore : set.playerAScore), 0);
-  const setsWon = winnerId === match.playerAId ? result.playerASets : result.playerBSets;
-  return {
-    preliminaryScore: setsWon * 40 + winnerGames - loserGames,
-    loserPreliminaryScore: loserGames - winnerGames,
-  };
-}
-
-function maybeBuildPreliminaryBracket(db, match) {
-  const tournament = getTournament(db, match.tournamentId);
-  const categoryStage = tournament ? ensureTournamentCategoryStages(db, tournament).find((stage) => stage.categoryId === match.categoryId) : null;
-  if (!tournament || categoryStage?.format !== "Preliminar") return;
-  const preliminaries = db.matches
-    .filter((item) => item.tournamentId === match.tournamentId && item.categoryId === match.categoryId && item.phase === "Preliminar")
-    .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-  if (!preliminaries.length || preliminaries.some((item) => item.status !== "Finalizado" || !item.winnerId)) return;
-  buildPreliminaryBracketFromResults(db, tournament, match.categoryId);
-  tournament.phases = ["Preliminar", "32avos", "16avos", "Octavos", "Cuartos", "Semifinal", "Final"];
-}
-
-function applyFinalResult(db, id, payload, actor, action) {
-  const target = db.matches.find((item) => item.id === id);
-  if (!target) return null;
-  const tournament = getTournament(db, target.tournamentId);
-  const matchFormat = normalizeMatchFormat(tournament?.matchFormat || DEFAULT_MATCH_FORMAT);
-  const {
-    sets = [],
-    completedEarly = false,
-    earlyFinishReason = "",
-    manualWinnerId = null,
-  } = Array.isArray(payload) ? { sets: payload } : payload || {};
-  const result = completedEarly
-    ? buildEarlyFinishResult(target, sets, matchFormat, earlyFinishReason, manualWinnerId)
-    : calculateMatchWinner({ ...target, sets, matchFormat });
-  if (!result.valid) {
-    throw new Error(result.error);
-  }
-
-  const resultText = result.sets.length ? formatResultSets(result.sets) : "Finalizacion anticipada";
-  Object.assign(target, {
-    status: "Finalizado",
-    result: resultText,
-    resultDetail: {
-      sets: result.sets,
-      winnerId: result.winnerId,
-      loserId: result.loserId,
-      playerASets: result.playerASets,
-      playerBSets: result.playerBSets,
-      completedEarly: Boolean(result.completedEarly),
-      earlyFinishReason: result.earlyFinishReason || null,
-      manualWinnerId: result.manualWinnerId || null,
-    },
-    sets: result.sets,
-    winnerId: result.winnerId,
-    loserId: result.loserId,
-    completedEarly: Boolean(result.completedEarly),
-    earlyFinishReason: result.earlyFinishReason || null,
-    walkoverPlayerId: null,
-  });
-  if (target.phase === "Preliminar") {
-    Object.assign(target, calculatePreliminaryPerformance(result, result.winnerId, target));
-  }
-  advanceBracketWinner(db, target);
-    maybeBuildPreliminaryBracket(db, target);
-  return { match: target, action, actor };
+  return mapMatch(data);
 }
 
 export const matchService = {
   async getMatches() {
-    return mockRequest(() => readMockData((db) => db.matches.map((match) => withTournamentFormat(db, match))), "No pudimos cargar los partidos.");
+    return fetchMatches();
   },
-  async getPlayerMatches(playerId = "player-1") {
-    return mockRequest(() =>
-      readMockData((db) => db.matches.filter((match) => match.playerAId === playerId || match.playerBId === playerId).map((match) => withTournamentFormat(db, match))), "No pudimos cargar los partidos del jugador.");
+
+  async getPlayerMatches(playerId) {
+    return fetchMatches((query) => query.or(`player1_id.eq.${playerId},player2_id.eq.${playerId}`));
   },
+
   async getMatchById(id) {
-    return mockRequest(() => readMockData((db) => withTournamentFormat(db, db.matches.find((match) => match.id === id) || null)), "No pudimos cargar el partido.");
+    return fetchMatchById(id);
   },
+
   async getMatchesByPlayer(playerId) {
     return this.getPlayerMatches(playerId);
   },
+
   async getMatchesByTournament(tournamentId, categoryId = null) {
-    return mockRequest(() => readMockData((db) =>
-      db.matches
-        .filter((match) => match.tournamentId === tournamentId)
-        .filter((match) => !categoryId || match.categoryId === categoryId)
-        .map((match) => withTournamentFormat(db, match))), "No pudimos cargar los partidos del torneo.");
+    let tournamentCategoryId = null;
+    if (categoryId) {
+      const client = ensureSupabaseDataClient();
+      const { data, error } = await client
+        .from("tournament_categories")
+        .select("id")
+        .eq("tournament_id", tournamentId)
+        .eq("category_id", categoryId)
+        .maybeSingle();
+      if (error) {
+        logSupabaseDataError("match tournament category lookup", error);
+        throw createDataError("No pudimos cargar los partidos del torneo.", { cause: error });
+      }
+      tournamentCategoryId = data?.id || null;
+      if (!tournamentCategoryId) return [];
+    }
+    return fetchMatches((query) => {
+      let scoped = query.eq("tournament_id", tournamentId);
+      if (tournamentCategoryId) scoped = scoped.eq("tournament_category_id", tournamentCategoryId);
+      return scoped;
+    });
   },
+
   async savePartialResult(id, { sets = [] }, actor = "admin-1") {
-    return mockRequest(async () => {
-      const match = mutateMockData((db) => {
-        const target = db.matches.find((item) => item.id === id);
-        if (!target) return null;
-        const tournament = getTournament(db, target.tournamentId);
-        const matchFormat = normalizeMatchFormat(tournament?.matchFormat || DEFAULT_MATCH_FORMAT);
-        const normalizedSets = sets
-          .filter((set) => set.playerAScore !== "" && set.playerBScore !== "")
-          .map((set, index) => normalizeScoreSet(set, index, matchFormat));
-        Object.assign(target, {
-          status: "En juego",
-          sets: normalizedSets,
-          result: normalizedSets.length ? formatResultSets(normalizedSets) : null,
-          resultDetail: { partial: true, sets: normalizedSets },
-        });
-        return withTournamentFormat(db, target);
-      });
-      await auditService.record({
-        action: "save_partial_result",
-        entityType: "match",
-        entityId: id,
-        description: "Resultado parcial guardado",
-        actor,
-      });
-      return match;
-    }, "No pudimos guardar el parcial.");
+    const match = await fetchMatchById(id);
+    if (!match) return null;
+    const client = ensureSupabaseDataClient();
+    const normalizedSets = sets
+      .filter((set) => set.playerAScore !== "" && set.playerBScore !== "")
+      .map((set, index) => normalizeScoreSet(set, index, match.matchFormat));
+    const { error } = await client.rpc("save_match_result", {
+      p_match_id: id,
+      p_sets: uiSetsToDb(normalizedSets),
+      p_result_type: "NORMAL",
+      p_winner_id: null,
+      p_loser_id: null,
+      p_result_text: normalizedSets.length ? formatResultSets(normalizedSets) : null,
+      p_status: "in_progress",
+    });
+    if (error) {
+      logSupabaseDataError("save partial result", error);
+      throw createDataError("No pudimos guardar el parcial.", { cause: error });
+    }
+    await auditService.record({
+      action: "save_partial_result",
+      entityType: "match",
+      entityId: id,
+      description: "Resultado parcial guardado",
+      actor,
+    });
+    return fetchMatchById(id);
   },
+
   async finalizeMatch(id, payload = {}, actor = "admin-1") {
-    return mockRequest(async () => {
-      const applied = mutateMockData((db) => {
-        const result = applyFinalResult(db, id, payload, actor, "finalize_match");
-        return result ? withTournamentFormat(db, result.match) : null;
-      });
-      await auditService.record({
-        action: "finalize_match",
-        entityType: "match",
-        entityId: id,
-        description: "Resultado cargado",
-        actor,
-      });
-      return applied;
-    }, "No pudimos finalizar el partido.");
+    const match = await fetchMatchById(id);
+    if (!match) return null;
+    const {
+      sets = [],
+      completedEarly = false,
+      earlyFinishReason = "",
+      manualWinnerId = null,
+    } = Array.isArray(payload) ? { sets: payload } : payload || {};
+    const result = calculateMatchWinner({ ...match, sets, matchFormat: match.matchFormat });
+    let winnerId = result.winnerId;
+    let loserId = result.loserId;
+    let resultSets = result.sets;
+    let resultType = "NORMAL";
+    if (!result.valid && completedEarly) {
+      if (!earlyFinishReason?.trim()) throw createDataError("Indica el motivo de finalizacion anticipada.");
+      if (![match.playerAId, match.playerBId].includes(manualWinnerId)) throw createDataError("Selecciona el ganador del partido finalizado anticipadamente.");
+      winnerId = manualWinnerId;
+      loserId = manualWinnerId === match.playerAId ? match.playerBId : match.playerAId;
+      resultSets = sets.filter((set) => set.playerAScore !== "" && set.playerBScore !== "").map((set, index) => normalizeScoreSet(set, index, match.matchFormat));
+      resultType = "EARLY_FINISH";
+    } else if (!result.valid) {
+      throw createDataError(result.error);
+    }
+
+    const client = ensureSupabaseDataClient();
+    const { error } = await client.rpc("save_match_result", {
+      p_match_id: id,
+      p_sets: uiSetsToDb(resultSets),
+      p_result_type: resultType,
+      p_winner_id: winnerId,
+      p_loser_id: loserId,
+      p_result_text: resultSets.length ? formatResultSets(resultSets) : "Finalizacion anticipada",
+      p_status: "finished",
+    });
+    if (error) {
+      logSupabaseDataError("finalize match", error);
+      throw createDataError("No pudimos finalizar el partido.", { cause: error });
+    }
+    await auditService.record({
+      action: "finalize_match",
+      entityType: "match",
+      entityId: id,
+      description: "Resultado cargado",
+      actor,
+    });
+    return fetchMatchById(id);
   },
+
   async editResult(id, payload = {}, actor = "admin-1") {
-    return mockRequest(async () => {
-      const applied = mutateMockData((db) => {
-        const result = applyFinalResult(db, id, payload, actor, "edit_result");
-        return result ? withTournamentFormat(db, result.match) : null;
-      });
-      await auditService.record({
-        action: "edit_result",
-        entityType: "match",
-        entityId: id,
-        description: "Resultado editado",
-        actor,
-      });
-      return applied;
-    }, "No pudimos editar el resultado.");
+    return this.finalizeMatch(id, payload, actor);
   },
+
   async saveResult(id, payload, actor = "admin-1") {
     return this.finalizeMatch(id, payload, actor);
   },
+
   async registerWalkover(id, { walkoverPlayerId = null, doubleWalkover = false }, actor = "admin-1") {
-    return mockRequest(async () => {
-      const match = mutateMockData((db) => {
-        const target = db.matches.find((item) => item.id === id);
-        if (!target) return null;
-        const winnerId = doubleWalkover ? null : walkoverPlayerId === target.playerAId ? target.playerBId : target.playerAId;
-        const loserId = doubleWalkover ? null : walkoverPlayerId;
-        Object.assign(target, {
-          status: doubleWalkover ? "Doble W.O." : "W.O.",
-          result: doubleWalkover ? "Doble W.O. - pendiente de resolucion" : "Ganador por W.O.",
-          resultDetail: doubleWalkover ? { doubleWalkover: true, pendingResolution: true } : { walkover: true, winnerId, loserId },
-          sets: [],
-          winnerId,
-          loserId,
-          walkoverPlayerId: doubleWalkover ? null : walkoverPlayerId,
-          doubleWalkover,
-        });
-        advanceBracketWinner(db, target);
-        return withTournamentFormat(db, target);
-      });
-      await auditService.record({
-        action: doubleWalkover ? "register_double_walkover" : "register_walkover",
-        entityType: "match",
-        entityId: id,
-        description: doubleWalkover ? "Doble W.O. registrado" : "W.O. registrado",
-        actor,
-      });
-      return match;
-    }, "No pudimos registrar el W.O.");
+    const match = await fetchMatchById(id);
+    if (!match) return null;
+    const winnerId = doubleWalkover ? null : walkoverPlayerId === match.playerAId ? match.playerBId : match.playerAId;
+    const loserId = doubleWalkover ? null : walkoverPlayerId;
+    const sets = doubleWalkover ? [] : winnerId === match.playerAId
+      ? [{ playerAScore: 6, playerBScore: 0 }, { playerAScore: 6, playerBScore: 0 }]
+      : [{ playerAScore: 0, playerBScore: 6 }, { playerAScore: 0, playerBScore: 6 }];
+    const client = ensureSupabaseDataClient();
+    const { error } = await client.rpc("save_match_result", {
+      p_match_id: id,
+      p_sets: uiSetsToDb(sets),
+      p_result_type: doubleWalkover ? "DOUBLE_WO" : "WO",
+      p_winner_id: winnerId,
+      p_loser_id: loserId,
+      p_result_text: doubleWalkover ? "Doble W.O. - pendiente de resolucion" : "Ganador por W.O.",
+      p_status: doubleWalkover ? "standby" : "finished",
+    });
+    if (error) {
+      logSupabaseDataError("register walkover", error);
+      throw createDataError("No pudimos registrar el W.O.", { cause: error });
+    }
+    await auditService.record({
+      action: doubleWalkover ? "register_double_walkover" : "register_walkover",
+      entityType: "match",
+      entityId: id,
+      description: doubleWalkover ? "Doble W.O. registrado" : "W.O. registrado",
+      actor,
+    });
+    return fetchMatchById(id);
   },
+
   async rescheduleMatch(id, { date, time, court }, actor = "admin-1") {
-    return mockRequest(async () => {
-      const match = mutateMockData((db) => {
-        const target = db.matches.find((item) => item.id === id);
-        if (!target) return null;
-        Object.assign(target, { date, time, court, status: "Reprogramado" });
-        return withTournamentFormat(db, target);
-      });
-      await auditService.record({
-        action: "reschedule_match",
-        entityType: "match",
-        entityId: id,
-        description: "Partido reprogramado en mock.",
-        actor,
-      });
-      return match;
-    }, "No pudimos reprogramar el partido.");
+    const client = ensureSupabaseDataClient();
+    const scheduledAt = date ? new Date(`${date}T${time || "00:00"}`).toISOString() : null;
+    const { error } = await client
+      .from("matches")
+      .update({ scheduled_at: scheduledAt, court: court || null, status: "rescheduled" })
+      .eq("id", id);
+    if (error) {
+      logSupabaseDataError("reschedule match", error);
+      throw createDataError("No pudimos reprogramar el partido.", { cause: error });
+    }
+    await auditService.record({
+      action: "reschedule_match",
+      entityType: "match",
+      entityId: id,
+      description: "Partido reprogramado.",
+      actor,
+    });
+    return fetchMatchById(id);
   },
+
   calculateMatchWinner,
 };

@@ -16,7 +16,7 @@ import { DEFAULT_MATCH_FORMAT, describeMatchFormat } from "../../utils/matchForm
 
 const steps = [
   { id: "general", label: "General" },
-  { id: "categories", label: "Categorias" },
+  { id: "categories", label: "Categorías" },
   { id: "match", label: "Partido" },
   { id: "scoring", label: "Puntaje" },
   { id: "schedule", label: "Horarios" },
@@ -26,12 +26,11 @@ const steps = [
 const initialForm = {
   name: "",
   description: "",
-  startDate: "2026-08-08",
-  endDate: "2026-08-16",
-  registrationCloseDate: "2026-08-06",
-  semifinalsDate: "2026-08-15",
-  finalsDate: "2026-08-16",
-  price: 18000,
+  startDate: "",
+  endDate: "",
+  semifinalsDate: "",
+  finalsDate: "",
+  price: "",
   scoringSystemId: "",
   scoringSystem: "",
   type: "Formato pendiente",
@@ -46,6 +45,32 @@ function hasDuplicatedTimes(times) {
 function sortTimes(times) {
   return [...times].filter(Boolean).sort((a, b) => a.localeCompare(b));
 }
+
+function parseLocalDate(date) {
+  return date ? new Date(`${date}T12:00:00`) : null;
+}
+
+function toDateInputValue(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function addDaysToDateString(date, days) {
+  const parsed = parseLocalDate(date);
+  if (!parsed || Number.isNaN(parsed.getTime())) return "";
+  parsed.setDate(parsed.getDate() + days);
+  return toDateInputValue(parsed);
+}
+
+function isSunday(date) {
+  const parsed = parseLocalDate(date);
+  return Boolean(parsed && !Number.isNaN(parsed.getTime()) && parsed.getDay() === 0);
+}
+
+const timeOptions = Array.from({ length: 14 }, (_, hourIndex) => hourIndex + 9).flatMap((hour) =>
+  [0, 15, 30, 45]
+    .filter((minutes) => hour < 22 || minutes === 0)
+    .map((minutes) => `${String(hour).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`)
+);
 
 export function AdminTournamentCreatePage() {
   const navigate = useNavigate();
@@ -98,6 +123,15 @@ export function AdminTournamentCreatePage() {
   if (error) return <ErrorState title="No pudimos cargar el asistente." onRetry={reload} />;
 
   function updateField(field, value) {
+    if (field === "endDate" || field === "finalsDate") {
+      setForm((current) => ({
+        ...current,
+        endDate: value,
+        finalsDate: value,
+        semifinalsDate: addDaysToDateString(value, -7),
+      }));
+      return;
+    }
     setForm((current) => ({ ...current, [field]: value }));
   }
 
@@ -146,7 +180,7 @@ export function AdminTournamentCreatePage() {
   }
 
   function cancelCreation() {
-    if (!isDirty || window.confirm("Seguro que queres cancelar la creacion del torneo? Los datos ingresados se perderan.")) {
+    if (!isDirty || window.confirm("¿Seguro que querés cancelar la creación del torneo? Los datos ingresados se perderán.")) {
       navigate("/admin/tournaments");
     }
   }
@@ -154,17 +188,44 @@ export function AdminTournamentCreatePage() {
   async function publishTournament() {
     setFormError("");
     if (!form.name.trim()) {
-      setFormError("Completa el nombre del torneo.");
+      setFormError("Completá el nombre del torneo.");
       setActiveStep("general");
       return;
     }
     if (!selectedCategories.length) {
-      setFormError("Selecciona al menos una categoria.");
+      setFormError("Seleccioná al menos una categoría.");
       setActiveStep("categories");
       return;
     }
+    if (!form.startDate) {
+      setFormError("Completa la fecha de inicio del torneo.");
+      setActiveStep("general");
+      return;
+    }
+    if (!form.endDate || !isSunday(form.endDate)) {
+      setFormError("La fecha de finalización/final debe ser domingo.");
+      setActiveStep("general");
+      return;
+    }
+    if (parseLocalDate(form.startDate) > parseLocalDate(form.endDate)) {
+      setFormError("La fecha de inicio no puede ser posterior a la final.");
+      setActiveStep("general");
+      return;
+    }
+    const priceValue = String(form.price ?? "").trim();
+    if (!priceValue) {
+      setFormError("Completa el valor de inscripcion.");
+      setActiveStep("general");
+      return;
+    }
+    const numericPrice = Number(priceValue);
+    if (!Number.isFinite(numericPrice) || numericPrice < 0) {
+      setFormError("El valor de inscripcion debe ser un numero valido.");
+      setActiveStep("general");
+      return;
+    }
     if (!form.scoringSystemId) {
-      setFormError("Selecciona un sistema de puntaje activo.");
+      setFormError("Seleccioná un sistema de puntaje activo.");
       setActiveStep("scoring");
       return;
     }
@@ -194,20 +255,25 @@ export function AdminTournamentCreatePage() {
     }
 
     setPublishing(true);
-    const selectedScoringSystem = activeScoringSystems.find((system) => system.id === form.scoringSystemId);
-    const tournament = await tournamentService.createTournament({
+    try {
+      const selectedScoringSystem = activeScoringSystems.find((system) => system.id === form.scoringSystemId);
+      const tournament = await tournamentService.createTournament({
       ...form,
+      registrationCloseDate: null,
+      endDate: form.endDate,
+      finalsDate: form.endDate,
+      semifinalsDate: addDaysToDateString(form.endDate, -7),
       scoringSystemId: selectedScoringSystem?.id || form.scoringSystemId,
       scoringSystem: selectedScoringSystem?.name || form.scoringSystem,
-      description: form.description || "Torneo creado desde el asistente admin.",
+      description: form.description.trim(),
       status: "Inscripciones abiertas",
-      price: Number(form.price),
+      price: numericPrice,
       categories: selectedCategories,
       categoryStages: selectedCategories.map((categoryId) => {
         const category = categories.find((item) => item.id === categoryId);
         return {
           categoryId,
-          categoryName: category ? `${category.name} ${category.branch}` : "Categoria",
+          categoryName: category ? `${category.name} ${category.branch}` : "Categoría",
           format: "",
           recommendedFormat: null,
           formatStatus: "pending",
@@ -226,8 +292,26 @@ export function AdminTournamentCreatePage() {
       participants: [],
       registrationStatus: "No inscripto",
       playerTournamentStatus: "Disponible",
-    });
-    navigate(`/admin/tournaments/${tournament.id}?tab=${tournament.isDevTest ? "formats" : "summary"}`);
+      });
+      navigate(`/admin/tournaments/${tournament.id}?tab=summary`);
+    } catch (createError) {
+      if (import.meta.env.DEV) {
+        const source = createError.cause || createError;
+        console.error("[GAME Admin] create tournament error", {
+          table: source.table || null,
+          select: source.select || null,
+          filters: source.filter || null,
+          code: source.code || null,
+          message: source.message || createError.message || null,
+          details: source.details || null,
+          hint: source.hint || null,
+          status: source.status || null,
+        });
+      }
+      setFormError(createError.message || "No pudimos crear el torneo.");
+    } finally {
+      setPublishing(false);
+    }
   }
 
   return (
@@ -236,7 +320,7 @@ export function AdminTournamentCreatePage() {
         <div>
           <span className="eyebrow">Nuevo torneo</span>
           <h1>Asistente de creacion</h1>
-          <p>Completa la informacion del torneo y publica desde el resumen final.</p>
+          <p>Completá la información del torneo y publicá desde el resumen final.</p>
         </div>
         <Button variant="ghost" icon={X} onClick={cancelCreation}>Cancelar</Button>
       </header>
@@ -247,14 +331,18 @@ export function AdminTournamentCreatePage() {
       <Card className="form-card">
         {activeStep === "general" ? (
           <div className="form-grid">
-            <label>Nombre<input value={form.name} onChange={(event) => updateField("name", event.target.value)} placeholder="GAME 1000 Copa Invierno" /></label>
+            <label>Nombre<input value={form.name} onChange={(event) => updateField("name", event.target.value)} placeholder="Copa Invierno" /></label>
             <label>Descripcion<textarea value={form.description} onChange={(event) => updateField("description", event.target.value)} placeholder="Descripcion opcional del torneo" /></label>
             <label>Fecha de inicio<input type="date" value={form.startDate} onChange={(event) => updateField("startDate", event.target.value)} /></label>
-            <label>Fecha de finalizacion<input type="date" value={form.endDate} onChange={(event) => updateField("endDate", event.target.value)} /></label>
-            <label>Cierre previsto de inscripciones<input type="date" value={form.registrationCloseDate} onChange={(event) => updateField("registrationCloseDate", event.target.value)} /></label>
-            <label>Fecha de semifinal<input type="date" value={form.semifinalsDate} onChange={(event) => updateField("semifinalsDate", event.target.value)} /></label>
-            <label>Dia de finales<input type="date" value={form.finalsDate} onChange={(event) => updateField("finalsDate", event.target.value)} /></label>
+            <label>Fecha de finalizacion del torneo / Final<input type="date" value={form.endDate} onChange={(event) => updateField("endDate", event.target.value)} /></label>
             <label>Valor de inscripcion<input type="number" value={form.price} onChange={(event) => updateField("price", event.target.value)} /></label>
+            {form.endDate ? (
+              <div className="info-band">
+                <strong>Fechas de definicion</strong>
+                <span>Semifinal: {formatDate(addDaysToDateString(form.endDate, -7))}</span>
+                <span>Final: {formatDate(form.endDate)}</span>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -319,7 +407,7 @@ export function AdminTournamentCreatePage() {
                     onClick={() => setForm((current) => ({ ...current, scoringSystemId: system.id, scoringSystem: system.name }))}
                   >
                     <strong>{system.name}</strong>
-                    <span>Inscripcion {system.inscription} / Campeon {system.champion} / Subcampeon {system.runnerUp}</span>
+                    <span>Inscripción {system.inscription} / Campeón {system.champion} / Subcampeón {system.runnerUp}</span>
                   </button>
                 ))}
               </div>
@@ -354,14 +442,13 @@ export function AdminTournamentCreatePage() {
 
         {activeStep === "publish" ? (
           <div className="publish-summary">
-            <SummarySection title="Informacion general" icon={CalendarDays}>
+            <SummarySection title="Información general" icon={CalendarDays}>
               <span>Nombre: {form.name || "Sin nombre"}</span>
-              <span>Descripcion: {form.description || "Sin descripcion"}</span>
+              {form.description.trim() ? <span>Descripcion: {form.description.trim()}</span> : null}
               <span>Inicio: {formatDate(form.startDate)}</span>
-              <span>Finalizacion: {formatDate(form.endDate)}</span>
-              <span>Cierre previsto: {formatDate(form.registrationCloseDate)}</span>
-              <span>Semifinal: {formatDate(form.semifinalsDate)}</span>
-              <span>Dia de finales: {formatDate(form.finalsDate)}</span>
+              <span>Finalizacion / Final: {formatDate(form.endDate)}</span>
+              <span>Semifinal automatica: {formatDate(addDaysToDateString(form.endDate, -7))}</span>
+              <span>Valor de inscripcion: ${form.price || "Sin definir"}</span>
             </SummarySection>
             <SummarySection title="Formato de partido" icon={Trophy}>
               <span>Sets: {describeMatchFormat(form.matchFormat).sets}</span>
@@ -373,7 +460,7 @@ export function AdminTournamentCreatePage() {
               <span>{activeScoringSystems.find((system) => system.id === form.scoringSystemId)?.name || "Sin sistema seleccionado"}</span>
               <span>ID: {form.scoringSystemId || "No definido"}</span>
             </SummarySection>
-            <SummarySection title="Categorias" icon={UsersRound}>
+            <SummarySection title="Categorías" icon={UsersRound}>
               {selectedCategoryNames.length ? selectedCategoryNames.map((name) => <span key={name}>{name}</span>) : <span>Sin categorias seleccionadas</span>}
             </SummarySection>
             <SummarySection title="Horarios" icon={Clock}>
@@ -396,6 +483,7 @@ export function AdminTournamentCreatePage() {
 }
 
 function ScheduleColumn({ title, capacity, times, hasError, onChange, onAdd, onRemove }) {
+  const listId = `time-options-${title}`;
   return (
     <section className="schedule-column">
       <div className="section-title">
@@ -405,11 +493,14 @@ function ScheduleColumn({ title, capacity, times, hasError, onChange, onAdd, onR
       <div className="time-list">
         {times.map((time, index) => (
           <div key={`${title}-${index}`} className="time-row">
-            <input type="time" value={time} onChange={(event) => onChange(index, event.target.value)} />
+            <input type="time" min="09:00" max="22:00" step="900" list={listId} value={time} onChange={(event) => onChange(index, event.target.value)} />
             <Button variant="ghost" size="icon" icon={Trash2} onClick={() => onRemove(index)}>Eliminar</Button>
           </div>
         ))}
       </div>
+      <datalist id={listId}>
+        {timeOptions.map((time) => <option key={time} value={time} />)}
+      </datalist>
       {hasError ? <span className="field-error">Hay horarios duplicados en este dia.</span> : null}
       <Button variant="outline-green" onClick={onAdd}>+ Agregar horario</Button>
     </section>

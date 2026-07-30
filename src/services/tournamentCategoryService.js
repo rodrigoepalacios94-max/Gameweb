@@ -1,5 +1,6 @@
 import { createMockId, mutateMockData, readMockData } from "../mocks/mockDatabase";
 import { DEFAULT_MATCH_FORMAT } from "../utils/matchFormat";
+import { getZoneBracketValidation, getZoneMainRoundNames, getZoneValidationMessage, normalizeZoneQualifierCount, orderZoneQualifiersForBracket, pairZoneAccessPlayers, proposeZoneDistribution, resolveZoneQualifiers } from "../utils/zoneFormat";
 import { mockRequest } from "./serviceUtils";
 
 export const TOURNAMENT_FORMATS = ["Preliminar", "Zonas", "Eliminacion Directa"];
@@ -145,16 +146,63 @@ function createMatchFromBracket(db, tournament, stage, round, bracketMatch, inde
   return match;
 }
 
+function createByeMatch(db, tournament, stage, player, roundName, index) {
+  const id = createMockId("match");
+  const match = {
+    id,
+    tournamentId: tournament.id,
+    categoryId: stage.categoryId,
+    tournament: tournament.name,
+    category: stage.categoryName,
+    round: roundName,
+    phase: "BYE",
+    playerAId: player.id,
+    playerA: player.fullName,
+    playerAAvatar: player.avatar,
+    playerBId: null,
+    playerB: "BYE",
+    playerBAvatar: null,
+    opponentId: null,
+    opponent: "BYE",
+    opponentAvatar: null,
+    date: "",
+    time: "No programable",
+    court: "No programable",
+    status: "Finalizado",
+    attendanceStatus: {},
+    result: "6-0 / 6-0",
+    resultDetail: { type: "BYE", source: "Ranking General", note: "Victoria administrativa por BYE." },
+    sets: [{ playerA: 6, playerB: 0 }, { playerA: 6, playerB: 0 }],
+    winnerId: player.id,
+    loserId: null,
+    pointsEarned: 0,
+    discipline: { claims: [], confirmedFaults: [] },
+    bye: true,
+    byeSource: "Ranking General",
+    connectionNote: `BYE ${index + 1} por Ranking General`,
+  };
+  db.matches.push(match);
+  return match;
+}
+
 function largestStandardDraw(count) {
   return [...STANDARD_DRAWS].reverse().find((size) => size <= count) || 4;
 }
 
 function nextMainRoundNames(drawSize) {
   if (drawSize >= 32) return ["16avos", "Octavos", "Cuartos", "Semifinal", "Final"];
-  if (drawSize === 16) return ["16avos", "Cuartos", "Semifinal", "Final"];
+  if (drawSize === 16) return ["8vos", "Cuartos", "Semifinal", "Final"];
   if (drawSize === 8) return ["Cuartos", "Semifinal", "Final"];
   if (drawSize === 4) return ["Semifinal", "Final"];
   return ["Final"];
+}
+
+function previousAccessRoundName(baseDrawSize) {
+  if (baseDrawSize >= 32) return "32avos";
+  if (baseDrawSize === 16) return "16avos";
+  if (baseDrawSize === 8) return "8vos";
+  if (baseDrawSize === 4) return "Cuartos";
+  return "Ronda de acceso";
 }
 
 function sortByRanking(players) {
@@ -208,32 +256,45 @@ function buildFutureRounds(stage, drawSize, firstRoundIndex = 1) {
 function buildDirectElimination(db, tournament, stage, players) {
   const sorted = sortByRanking(players);
   const baseDrawSize = players.length <= 4 ? Math.max(2, players.length) : largestStandardDraw(players.length);
-  const hasPreviousRound = players.length > baseDrawSize;
-  const previousPlayersCount = hasPreviousRound ? (players.length - baseDrawSize) * 2 : 0;
-  const previousPlayers = hasPreviousRound ? sorted.slice(-previousPlayersCount) : [];
-  const directPlayers = hasPreviousRound ? sorted.slice(0, sorted.length - previousPlayersCount) : sorted;
+  const accessMatchCount = Math.max(0, players.length - baseDrawSize);
+  const previousPlayersCount = accessMatchCount * 2;
+  const previousPlayers = previousPlayersCount ? sorted.slice(-previousPlayersCount) : [];
+  const directPlayers = previousPlayersCount ? sorted.slice(0, sorted.length - previousPlayersCount) : sorted;
   const rounds = [];
   const previousWinnerSlots = [];
+  const accessRoundName = previousAccessRoundName(baseDrawSize);
+  const directByes = previousPlayersCount
+    ? directPlayers.map((player, index) => {
+        const match = createByeMatch(db, tournament, stage, player, accessRoundName, index);
+        return {
+          playerId: player.id,
+          player: player.fullName,
+          source: "Ranking General",
+          score: "6-0 / 6-0",
+          matchId: match.id,
+        };
+      })
+    : [];
 
-  if (hasPreviousRound) {
+  if (previousPlayers.length) {
     const previousMatches = [];
     for (let index = 0; index < previousPlayers.length; index += 2) {
-      previousMatches.push(makeBracketMatch(`${stage.categoryId}-32avos-${previousMatches.length + 1}`, previousPlayers[index], previousPlayers[index + 1], {
-        connectionNote: "Ronda previa para completar el cuadro base sin byes masivos",
+      previousMatches.push(makeBracketMatch(`${stage.categoryId}-${accessRoundName}-${previousMatches.length + 1}`, previousPlayers[index], previousPlayers[index + 1], {
+        connectionNote: "Primera instancia para completar la llave con BYE por Ranking General",
       }));
-      previousWinnerSlots.push(`Ganador 32avos ${previousMatches.length}`);
+      previousWinnerSlots.push(`Ganador ${accessRoundName} ${previousMatches.length}`);
     }
-    const previousRound = { id: `${stage.categoryId}-32avos`, name: "32avos", matches: previousMatches };
+    const previousRound = { id: `${stage.categoryId}-${accessRoundName}`, name: accessRoundName, matches: previousMatches };
     previousRound.matches.forEach((match, index) => createMatchFromBracket(db, tournament, stage, previousRound, match, index));
     rounds.push(previousRound);
   }
 
-  const mainEntrants = [...directPlayers, ...previousWinnerSlots];
+  const mainEntrants = [...directPlayers.map((player) => ({ ...player, testNote: "BYE por Ranking General" })), ...previousWinnerSlots];
   const mainRoundNames = nextMainRoundNames(baseDrawSize);
   const firstMainRound = makePairedRound(stage, "main-1", mainRoundNames[0], mainEntrants, "Cuadro principal de eliminacion directa");
   firstMainRound.matches.forEach((match, index) => createMatchFromBracket(db, tournament, stage, firstMainRound, match, index));
   rounds.push(firstMainRound, ...buildFutureRounds(stage, baseDrawSize));
-  return rounds;
+  return { rounds, directByes };
 }
 
 function buildPreliminaries(db, tournament, stage, players) {
@@ -418,31 +479,23 @@ export function buildPreliminaryBracketFromResults(db, tournament, categoryId) {
   return bracket;
 }
 
-export function proposeZoneDistribution(participantCount = 0) {
-  const count = Number(participantCount || 0);
-  if (count <= 0) return [];
-  if (count <= 4) return [count];
-  let zoneCount = Math.max(1, Math.round(count / 3.5));
-  while (Math.ceil(count / zoneCount) > 4) zoneCount += 1;
-  while (zoneCount > 1 && Math.floor(count / zoneCount) < 3) zoneCount -= 1;
-  const base = Math.floor(count / zoneCount);
-  const remainder = count % zoneCount;
-  return Array.from({ length: zoneCount }, (_, index) => base + (index < remainder ? 1 : 0));
-}
-
 function buildZones(db, tournament, stage, players) {
   const sorted = sortByRanking(players);
   const distribution = proposeZoneDistribution(sorted.length);
   let cursor = 0;
   const zones = distribution.map((size, index) => {
     const zonePlayers = sorted.slice(cursor, cursor + size);
+    const zoneId = `${stage.categoryId}-zone-${index + 1}`;
+    const configuredQualifiers = stage.zonesConfig?.zoneQualifiers?.[zoneId] ?? stage.zonesConfig?.qualifiers;
     cursor += size;
     return {
-      id: `${stage.categoryId}-zone-${index + 1}`,
+      id: zoneId,
       name: `Zona ${String.fromCharCode(65 + index)}`,
-      qualifiers: stage.zonesConfig?.qualifiers || 1,
+      qualifiers: normalizeZoneQualifierCount(configuredQualifiers || 1),
       players: zonePlayers.map((player) => player.fullName),
+      playerIds: zonePlayers.map((player) => player.id),
       size,
+      status: "Pendiente de clasificacion",
     };
   });
 
@@ -464,23 +517,161 @@ function buildZones(db, tournament, stage, players) {
   return zones;
 }
 
-function buildZoneFinalSkeleton(stage, zones) {
-  const qualifierCount = zones.reduce((total, zone) => total + zone.qualifiers, 0);
-  const drawSize = STANDARD_DRAWS.find((size) => size >= qualifierCount) || 64;
-  const names = nextMainRoundNames(drawSize);
-  let matchCount = drawSize / 2;
-  return names.map((name, roundIndex) => {
-    const round = {
-      id: `${stage.categoryId}-zones-${roundIndex + 1}`,
+function applyZoneValidation(bracket) {
+  (bracket?.zones || []).forEach((zone) => {
+    zone.qualifiers = normalizeZoneQualifierCount(zone.qualifiers || 1);
+  });
+  const validation = getZoneBracketValidation((bracket?.zones || []).reduce((total, zone) => total + Number(zone.qualifiers || 0), 0));
+  bracket.zoneValidation = validation;
+  bracket.zoneClassificationStatus = getZoneValidationMessage(validation);
+  return validation;
+}
+
+function getZonePlayerObjects(db, zone) {
+  if (zone.playerIds?.length) {
+    return zone.playerIds.map((playerId) => getPlayerById(db, playerId)).filter(Boolean);
+  }
+  return (zone.players || []).map((player, index) => ({
+    id: null,
+    fullName: player,
+    ranking: index + 1,
+  }));
+}
+
+function getZoneStandings(db, zone) {
+  if (zone.standings?.length) {
+    return zone.standings.map((standing) => {
+      const player = standing.playerId ? getPlayerById(db, standing.playerId) : null;
+      return {
+        ...player,
+        id: standing.playerId || player?.id,
+        fullName: standing.playerName || player?.fullName,
+        zonePoints: standing.zonePoints ?? standing.points ?? standing.wins ?? 0,
+        wins: standing.wins ?? 0,
+        played: standing.played ?? 0,
+        setsWon: standing.setsWon ?? 0,
+        setsLost: standing.setsLost ?? 0,
+        setsDiff: standing.setsDiff ?? standing.setDifference ?? (Number(standing.setsWon || 0) - Number(standing.setsLost || 0)),
+        gamesWon: standing.gamesWon ?? 0,
+        gamesLost: standing.gamesLost ?? 0,
+        gamesDiff: standing.gamesDiff ?? standing.gameDifference ?? (Number(standing.gamesWon || 0) - Number(standing.gamesLost || 0)),
+        ranking: standing.ranking ?? player?.ranking ?? 9999,
+        position: standing.position,
+      };
+    });
+  }
+  return getZonePlayerObjects(db, zone).map((player) => ({
+    ...player,
+    zonePoints: player.zonePoints ?? 0,
+    wins: player.wins ?? 0,
+    played: player.played ?? 0,
+    setsWon: player.setsWon ?? 0,
+    setsLost: player.setsLost ?? 0,
+    setsDiff: player.setsDiff ?? 0,
+    gamesWon: player.gamesWon ?? 0,
+    gamesLost: player.gamesLost ?? 0,
+    gamesDiff: player.gamesDiff ?? 0,
+    ranking: player.ranking ?? 9999,
+    position: player.position,
+  }));
+}
+
+export function buildZoneEliminationBracket(db, tournament, stage, bracket) {
+  const validation = applyZoneValidation(bracket);
+  if (!validation.valid) {
+    bracket.rounds = [];
+    stage.status = "Zonas en juego";
+    return { ok: false, bracket, validation, message: bracket.zoneClassificationStatus };
+  }
+
+  const zoneResolutions = (bracket.zones || []).map((zone) => ({
+    zoneId: zone.id,
+    zoneName: zone.name,
+    zoneSize: zone.size,
+    ...resolveZoneQualifiers(getZoneStandings(db, zone), Number(zone.qualifiers || 0)),
+  }));
+  const qualifiers = zoneResolutions.flatMap((resolution) =>
+    resolution.qualifiers.map((player) => ({
+      ...player,
+      zoneId: resolution.zoneId,
+      zoneName: resolution.zoneName,
+      zoneSize: resolution.zoneSize,
+      zonePosition: player.position,
+      testNote: `Clasificado ${resolution.zoneName}`,
+    }))
+  );
+  bracket.zoneResolutions = zoneResolutions.map((resolution) => ({
+    zoneId: resolution.zoneId,
+    zoneName: resolution.zoneName,
+    usedRankingGeneral: resolution.usedRankingGeneral,
+    tiebreaks: resolution.tiebreaks,
+    qualifiers: resolution.qualifiers.map((player) => ({
+      playerId: player.id,
+      player: player.fullName || player.name || player.player,
+      ranking: player.ranking,
+    })),
+  }));
+  const orderedQualifiers = orderZoneQualifiersForBracket(qualifiers);
+  const directQualifiers = orderedQualifiers.slice(0, validation.directPlayers);
+  const accessQualifiers = orderedQualifiers.slice(validation.directPlayers);
+  const accessPairing = pairZoneAccessPlayers(accessQualifiers);
+  const entrants = [
+    ...directQualifiers,
+    ...accessPairing.pairs.map((_, index) => `Ganador ${validation.accessRoundName} ${index + 1}`),
+  ];
+  const roundNames = getZoneMainRoundNames(validation.target);
+  db.matches = db.matches.filter((match) => !(match.tournamentId === tournament.id && match.categoryId === stage.categoryId && match.phase === "Cuadro principal" && !match.result));
+  const accessRound = validation.accessMatches ? {
+    id: `${stage.categoryId}-zones-access`,
+    name: validation.accessRoundName,
+    matches: accessPairing.pairs.map(([playerA, playerB], index) => makeBracketMatch(`${stage.categoryId}-zones-access-${index + 1}`, playerA, playerB, {
+      connectionNote: "Ronda de acceso generada desde clasificados de zonas",
+    })),
+  } : null;
+  if (accessRound) {
+    accessRound.matches.forEach((match, index) => createMatchFromBracket(db, tournament, stage, accessRound, match, index));
+  }
+  const firstRound = makePairedRound(stage, "zones-main-1", roundNames[0], entrants, "Fase final generada desde zonas");
+  firstRound.matches.forEach((match, index) => createMatchFromBracket(db, tournament, stage, firstRound, match, index));
+  bracket.rounds = [
+    ...(accessRound ? [accessRound] : []),
+    firstRound,
+    ...roundNames.slice(1).map((name, roundOffset) => {
+    const matchCount = Math.max(1, validation.target / (2 ** (roundOffset + 2)));
+    return {
+      id: `${stage.categoryId}-zones-${name.toLowerCase()}-${roundOffset + 2}`,
       name,
-      matches: Array.from({ length: matchCount }, (_, index) => makeBracketMatch(`${stage.categoryId}-zones-${name}-${index + 1}`, `Clasificado ${index * 2 + 1}`, `Clasificado ${index * 2 + 2}`, {
+      matches: Array.from({ length: matchCount }, (_, index) => makeBracketMatch(`${stage.categoryId}-zones-${name}-${index + 1}`, `Ganador ${name} ${index + 1}`, "A definir", {
         score: "A programar",
-        connectionNote: "Fase final pendiente de clasificacion de zonas",
+        connectionNote: "Cruce pendiente de la fase final de zonas",
       })),
     };
-    matchCount = Math.max(1, matchCount / 2);
-    return round;
-  });
+  })];
+  bracket.qualifiers = orderedQualifiers.map((player, index) => ({
+    playerId: player.id,
+    playerName: player.fullName || player.name || player.player,
+    zoneId: player.zoneId,
+    zoneName: player.zoneName,
+    zoneSize: player.zoneSize,
+    zonePosition: player.zonePosition,
+    ranking: player.ranking,
+    sportOrder: index + 1,
+    entryPath: index < validation.directPlayers ? "direct" : "access",
+  }));
+  bracket.zoneAccessPlan = {
+    total: validation.total,
+    target: validation.target,
+    directPlayers: validation.directPlayers,
+    accessPlayers: validation.accessPlayers,
+    accessMatches: validation.accessMatches,
+    accessRoundName: validation.accessRoundName,
+    directRoundName: validation.directRoundName,
+    sameZoneAccessPairs: accessPairing.sameZonePairs,
+    avoidedSameZone: accessPairing.avoidedSameZone,
+  };
+  bracket.zoneGeneratedAt = new Date().toISOString();
+  stage.status = "Cuadro generado";
+  return { ok: true, bracket, validation, message: bracket.zoneClassificationStatus };
 }
 
 export function generateCategoryBracketInDb(db, tournamentId, categoryId) {
@@ -529,16 +720,19 @@ export function generateCategoryBracketInDb(db, tournamentId, categoryId) {
       qualifiers: bracket.zones[0]?.qualifiers || 1,
       distribution: bracket.zoneDistribution,
     };
-    bracket.rounds = buildZoneFinalSkeleton(stage, bracket.zones);
+    applyZoneValidation(bracket);
+    stage.status = "Zonas en juego";
   } else {
-    bracket.rounds = buildDirectElimination(db, tournament, stage, players);
+    const directElimination = buildDirectElimination(db, tournament, stage, players);
+    bracket.rounds = directElimination.rounds;
+    bracket.directByes = directElimination.directByes;
   }
 
   db.brackets[stage.bracketKey] = bracket;
-  stage.status = "Cuadro generado";
+  if (stage.format !== "Zonas") stage.status = "Cuadro generado";
   stage.progress = {
-    totalMatches: bracket.rounds.reduce((total, round) => total + round.matches.length, 0) + bracket.preliminaries.length,
-    completedMatches: 0,
+    totalMatches: bracket.rounds.reduce((total, round) => total + round.matches.length, 0) + bracket.preliminaries.length + (bracket.directByes?.length || 0),
+    completedMatches: bracket.directByes?.length || 0,
   };
   return bracket;
 }
@@ -636,6 +830,42 @@ export const tournamentCategoryService = {
   },
   async generateCategoryBracket(tournamentId, categoryId) {
     return mockRequest(() => mutateMockData((db) => generateCategoryBracketInDb(db, tournamentId, categoryId)), "No pudimos generar cuadro por categoria.");
+  },
+  async updateZoneQualifiers(tournamentId, categoryId, zoneId, qualifiers) {
+    return mockRequest(() => mutateMockData((db) => {
+      const tournament = db.tournaments.find((item) => item.id === tournamentId);
+      if (!tournament) return null;
+      const stage = ensureTournamentCategoryStages(db, tournament).find((item) => item.categoryId === categoryId);
+      const bracket = stage ? db.brackets[stage.bracketKey] : null;
+      const zone = bracket?.zones?.find((item) => item.id === zoneId);
+      const value = Number(qualifiers);
+      if (!stage || !bracket || !zone || ![1, 2].includes(value)) return null;
+      zone.qualifiers = value;
+      stage.zonesConfig = {
+        ...(stage.zonesConfig || {}),
+        zones: bracket.zones.length,
+        distribution: bracket.zoneDistribution || bracket.zones.map((item) => item.size),
+        zoneQualifiers: {
+          ...(stage.zonesConfig?.zoneQualifiers || {}),
+          [zoneId]: value,
+        },
+      };
+      bracket.rounds = [];
+      bracket.zoneGeneratedAt = null;
+      stage.status = "Zonas en juego";
+      applyZoneValidation(bracket);
+      return bracket;
+    }), "No pudimos actualizar clasificados por zona.");
+  },
+  async generateZoneEliminationBracket(tournamentId, categoryId) {
+    return mockRequest(() => mutateMockData((db) => {
+      const tournament = db.tournaments.find((item) => item.id === tournamentId);
+      if (!tournament) return null;
+      const stage = ensureTournamentCategoryStages(db, tournament).find((item) => item.categoryId === categoryId);
+      const bracket = stage ? db.brackets[stage.bracketKey] : null;
+      if (!stage || !bracket || stage.format !== "Zonas") return null;
+      return buildZoneEliminationBracket(db, tournament, stage, bracket);
+    }), "No pudimos generar la llave desde zonas.");
   },
   async generateAllCategoryBrackets(tournamentId) {
     return mockRequest(() => mutateMockData((db) => {

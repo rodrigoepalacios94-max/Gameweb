@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Eye, Pencil, Plus, XCircle } from "lucide-react";
 import { Badge } from "../../components/common/Badge";
@@ -8,23 +8,53 @@ import { ErrorState } from "../../components/common/ErrorState";
 import { LoadingState } from "../../components/common/LoadingState";
 import { Tabs } from "../../components/common/Tabs";
 import { TournamentCard } from "../../components/tournaments/TournamentCard";
+import { useAuth } from "../../context/AuthContext";
 import { useAsyncData } from "../../hooks/useAsyncData";
-import { tournamentService } from "../../services/tournamentService";
+import { getAdminTournamentList } from "../../services/tournamentService";
 
 const filters = [
   { id: "all", label: "Todos" },
   { id: "Inscripciones abiertas", label: "Inscripciones" },
   { id: "En juego", label: "En juego" },
-  { id: "Proximamente", label: "Proximos" },
+  { id: "Proximamente", label: "Próximos" },
   { id: "Finalizado", label: "Finalizados" },
 ];
 
+function logAdminTournamentBaseError(error, { profile, session }) {
+  console.error("[GAME ADMIN TOURNAMENTS BASE ERROR]", {
+    code: error?.code || null,
+    message: error?.message || null,
+    details: error?.details || null,
+    hint: error?.hint || null,
+    status: error?.status || null,
+    sessionExists: Boolean(session),
+    authUserId: session?.user?.id || null,
+    profileRole: profile?.role || null,
+  });
+}
+
+async function loadAdminTournaments(authContext) {
+  try {
+    const result = await getAdminTournamentList();
+    return Array.isArray(result) ? result : [];
+  } catch (error) {
+    logAdminTournamentBaseError(error, authContext);
+    throw error;
+  }
+}
+
 export function AdminTournamentsPage() {
   const [tab, setTab] = useState("all");
-  const { data: tournaments, loading, error, reload } = useAsyncData(() => tournamentService.getTournaments(), []);
+  const { isAuthenticated, loading: authLoading, profile, realRole, session } = useAuth();
+  const canLoadTournaments = !authLoading && isAuthenticated && realRole === "admin" && profile?.role === "admin" && Boolean(session?.access_token);
+  const loadWhenAdminSessionReady = useCallback(
+    () => (canLoadTournaments ? loadAdminTournaments({ profile, session }) : []),
+    [canLoadTournaments, profile, session],
+  );
+  const { data: tournaments, loading, error, reload } = useAsyncData(loadWhenAdminSessionReady, [loadWhenAdminSessionReady]);
   const filtered = useMemo(() => (tournaments || []).filter((tournament) => tab === "all" || tournament.status === tab), [tab, tournaments]);
 
-  if (loading) return <LoadingState message="Cargando torneos..." />;
+  if (authLoading || !canLoadTournaments || loading) return <LoadingState message="Cargando torneos..." />;
   if (error) return <ErrorState title="No pudimos cargar torneos." onRetry={reload} />;
 
   return (
@@ -66,7 +96,7 @@ export function AdminTournamentsPage() {
           ))}
         </div>
       ) : (
-        <EmptyState title="Sin torneos para este filtro" description="Cambia el filtro o crea un torneo nuevo." />
+        <EmptyState title={tournaments?.length ? "Sin torneos para este filtro" : "TODAVÍA NO HAY TORNEOS"} description={tournaments?.length ? "Cambiá el filtro o crea un torneo nuevo." : "Creá un torneo nuevo cuando quieras iniciar la competencia."} />
       )}
     </div>
   );

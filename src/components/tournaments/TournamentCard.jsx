@@ -3,6 +3,7 @@ import { CalendarDays, Trophy } from "lucide-react";
 import { Badge } from "../common/Badge";
 import { Card } from "../common/Card";
 import { formatCurrency, formatDate } from "../../utils/formatters";
+import { getVisibleTournamentDescription } from "../../utils/tournamentDescription";
 
 const statusTone = {
   "Inscripciones abiertas": "success",
@@ -14,7 +15,8 @@ const statusTone = {
 
 export function TournamentCard({ tournament, to, actions }) {
   const navigate = useNavigate();
-  const cardTarget = to || (actions ? `/admin/tournaments/${tournament.id}${tournament.bracketGenerated || tournament.testSimulationStatus === "Simulado" ? "?tab=bracket" : ""}` : null);
+  const cardTarget = to || (actions ? `/admin/tournaments/${tournament.id}` : null);
+  const description = getVisibleTournamentDescription(tournament.description);
 
   function openCard() {
     if (cardTarget) navigate(cardTarget);
@@ -40,7 +42,7 @@ export function TournamentCard({ tournament, to, actions }) {
         <Badge tone={statusTone[tournament.status] || "neutral"}>{tournament.status}</Badge>
       </div>
       <h3>{tournament.name}</h3>
-      <p>{tournament.description}</p>
+      {description ? <p>{description}</p> : null}
       <div className="meta-grid">
         <span>
           <CalendarDays size={16} /> {formatDate(tournament.startDate)}
@@ -48,6 +50,7 @@ export function TournamentCard({ tournament, to, actions }) {
         <span>{tournament.type}</span>
         <span>{tournament.scoringSystem}</span>
         <span>{formatCurrency(tournament.price)}</span>
+        {tournament.categoryLabels?.length ? <span>{tournament.categoryLabels.join(", ")}</span> : null}
         {tournament.playerCategoryName ? <span>{tournament.playerCategoryName}</span> : null}
         {tournament.registrationStatus ? <span>{tournament.registrationStatus}</span> : null}
       </div>

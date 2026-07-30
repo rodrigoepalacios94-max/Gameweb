@@ -1,14 +1,32 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { CalendarDays, GitBranch, ListFilter } from "lucide-react";
-import { Badge } from "../../components/common/Badge";
+import { ListFilter } from "lucide-react";
 import { EmptyState } from "../../components/common/EmptyState";
 import { ErrorState } from "../../components/common/ErrorState";
 import { LoadingState } from "../../components/common/LoadingState";
 import { Tabs } from "../../components/common/Tabs";
-import { TournamentCard } from "../../components/tournaments/TournamentCard";
+import { PlayerTournamentCard } from "../../components/tournaments/PlayerTournamentCard";
+import { TournamentRegistrationModal } from "../../components/tournaments/TournamentRegistrationModal";
+import { useAuth } from "../../context/AuthContext";
 import { useAsyncData } from "../../hooks/useAsyncData";
+import { categoryService } from "../../services/categoryService";
+import { enrollmentService } from "../../services/enrollmentService";
+import { playerService } from "../../services/playerService";
 import { tournamentService } from "../../services/tournamentService";
+import { buildPlayerTournamentViews } from "../../utils/playerTournamentView";
+
+async function loadOptional(label, loader, fallback) {
+  try {
+    return await loader();
+  } catch (error) {
+    console.error(`[GAME Player] ${label}`, {
+      code: error.code || error.cause?.code || null,
+      message: error.message || error.cause?.message || null,
+      details: error.details || error.cause?.details || null,
+      hint: error.hint || error.cause?.hint || null,
+    });
+    return fallback;
+  }
+}
 
 const filters = [
   { id: "all", label: "Todos" },
@@ -19,15 +37,28 @@ const filters = [
 ];
 
 export function PlayerTournamentsPage() {
+  const { user } = useAuth();
   const [filter, setFilter] = useState("all");
-  const { data: tournaments, loading, error, reload } = useAsyncData(() => tournamentService.getTournaments(), []);
+  const [registrationTournament, setRegistrationTournament] = useState(null);
+  const { data, loading, error, reload } = useAsyncData(async () => {
+    const currentPlayer = await loadOptional("current player", () => playerService.getCurrentPlayer(), user);
+    const [tournaments, categories, enrollments] = await Promise.all([
+      loadOptional("visible tournaments", () => tournamentService.getVisibleTournamentsForPlayer(user.id), []),
+      loadOptional("categories", () => categoryService.getCategories(), []),
+      loadOptional("enrollments", () => enrollmentService.getEnrollmentsByPlayer(user.id), []),
+    ]);
+    const enrichedTournaments = buildPlayerTournamentViews({ tournaments, categories, currentPlayer, enrollments });
+    return { tournaments: enrichedTournaments, currentPlayer };
+  }, [user.id]);
+  const tournaments = data?.tournaments || [];
+  const currentPlayer = data?.currentPlayer || user;
   const filteredTournaments = useMemo(
     () =>
       (tournaments || []).filter((tournament) => {
-        if (filter === "open") return tournament.status === "Inscripciones abiertas";
-        if (filter === "mine") return tournament.registrationStatus === "Inscripto" || tournament.registrationStatus === "Finalizado";
-        if (filter === "active") return tournament.status === "En juego";
-        if (filter === "finished") return tournament.status === "Finalizado";
+        if (filter === "open") return tournament.status === "Inscripciones abiertas" && tournament.eligibleCategories.length > 0;
+        if (filter === "mine") return Boolean(tournament.existingEnrollments?.length) || tournament.participants?.includes(user.id);
+        if (filter === "active") return tournament.status === "En juego" && (Boolean(tournament.existingEnrollments?.length) || tournament.participants?.includes(user.id));
+        if (filter === "finished") return tournament.status === "Finalizado" && (Boolean(tournament.existingEnrollments?.length) || tournament.participants?.includes(user.id));
         return true;
       }),
     [filter, tournaments],
@@ -52,38 +83,26 @@ export function PlayerTournamentsPage() {
       {filteredTournaments.length ? (
         <div className="tournament-grid">
           {filteredTournaments.map((tournament) => (
-            <TournamentCard
+            <PlayerTournamentCard
               key={tournament.id}
               tournament={tournament}
-              to={`/player/tournaments/${tournament.id}`}
-              actions={
-                <>
-                  {tournament.status === "Inscripciones abiertas" ? (
-                    <Link className="button button--orange button--sm" to={`/player/tournaments/${tournament.id}/register`}>
-                      <span>Inscribirme</span>
-                    </Link>
-                  ) : null}
-                  {tournament.status === "En juego" ? (
-                    <>
-                      <Link className="button button--ghost button--sm" to={`/player/tournaments/${tournament.id}`}>
-                        <GitBranch size={16} />
-                        <span>Ver cuadro</span>
-                      </Link>
-                      <Link className="button button--ghost button--sm" to="/player/matches">
-                        <CalendarDays size={16} />
-                        <span>Ver partidos</span>
-                      </Link>
-                    </>
-                  ) : null}
-                  <Badge tone={tournament.registrationStatus === "Inscripto" ? "success" : "neutral"}>{tournament.registrationStatus}</Badge>
-                </>
-              }
+              personalStatus={tournament.personalStatus}
+              onRegister={() => setRegistrationTournament(tournament)}
             />
           ))}
         </div>
       ) : (
-        <EmptyState title="No hay torneos para este filtro" description="Cambia el filtro para ver otras competencias del circuito." />
+        <EmptyState title={tournaments.length ? "No hay torneos para este filtro" : "NO HAY TORNEOS DISPONIBLES"} description={tournaments.length ? "Cambiá el filtro para ver otras competencias del circuito." : "Cuando el administrador abra inscripciones, los torneos aparecerán acá."} />
       )}
+      <TournamentRegistrationModal
+        open={Boolean(registrationTournament)}
+        tournament={registrationTournament}
+        player={currentPlayer}
+        categories={registrationTournament?.playerTournamentCategories || []}
+        existingEnrollments={registrationTournament?.existingEnrollments || []}
+        onClose={() => setRegistrationTournament(null)}
+        onConfirmed={reload}
+      />
     </div>
   );
 }
