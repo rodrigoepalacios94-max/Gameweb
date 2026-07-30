@@ -1,143 +1,146 @@
 # GAME Web
 
-GAME es una plataforma web para administrar torneos de tenis: jugadores, categorias, inscripciones, partidos, ranking, notificaciones y disciplina.
+GAME es una plataforma profesional para la gestión integral de torneos de tenis, desarrollada como una Progressive Web App (PWA). Permite administrar jugadores, categorías, temporadas, inscripciones, pagos, cuadros, rankings, programación automática de partidos, reglamentos, notificaciones y disciplina desde una única plataforma.
 
-Esta primera etapa implementa la base completa del frontend local. No incluye backend real, Supabase, Mercado Pago ni algoritmos definitivos de llaves o cronograma.
+## Stack tecnológico
 
-## Tecnologias
+### Frontend
 
 - React
 - Vite
 - JavaScript
 - React Router
-- CSS normal
-- lucide-react
+- CSS
+- Progressive Web App (PWA)
 
-No se utiliza Tailwind.
+### Backend
 
-## Instalacion
+- Supabase
+  - PostgreSQL
+  - Authentication
+  - Row Level Security (RLS)
+  - Storage
+  - Edge Functions
+
+### Integraciones
+
+- Mercado Pago (Checkout Pro + Webhooks)
+- Resend (emails transaccionales)
+
+### Infraestructura
+
+- Netlify
+- Supabase
+- pg_cron
+- pg_net
+
+---
+
+## Instalación
 
 ```bash
 npm install
 ```
 
-## Ejecucion local
+## Desarrollo
 
 ```bash
 npm run dev
 ```
 
-## Build
+## Build de producción
 
 ```bash
 npm run build
 ```
 
-## Estructura
+---
 
-```txt
-src/
-  assets/
-  components/
-    common/
-    layout/
-    player/
-    admin/
-    tournaments/
-    brackets/
-  pages/
-    auth/
-    player/
-    admin/
-  layouts/
-  routes/
-  services/
-  mocks/
-  hooks/
-  context/
-  utils/
-  styles/
+## Funcionalidades
+
+### Jugadores
+
+- Registro e inicio de sesión
+- Perfil deportivo
+- Ranking
+- Historial
+- Inscripción a torneos
+- Disponibilidad horaria
+- Mis partidos
+- Notificaciones
+- Reglamento
+- Álbum de fotos
+
+### Administración
+
+- Dashboard
+- Gestión de jugadores
+- Gestión de categorías
+- Gestión de torneos
+- Gestión de temporadas
+- Sistema de puntuación
+- Disciplina
+- Programación automática
+- Seguridad
+- Reglamento
+- Notificaciones
+
+### Torneos
+
+- Eliminación directa
+- Fase de grupos
+- Preliminares
+- Ranking automático
+- Cabezas de serie
+- Disponibilidad de jugadores
+- Programación automática de partidos
+
+### Pagos
+
+- Mercado Pago
+- Webhooks
+- Confirmación automática
+
+### Emails
+
+- Apertura de torneos
+- Recordatorios
+- Suspensión de partidos
+- Avisos de pago
+- Cola automática mediante Edge Functions y Cron
+
+---
+
+## Arquitectura
+
+```
+React (Vite PWA)
+        │
+        ▼
+     Netlify
+        │
+        ▼
+ Supabase
+ ├── PostgreSQL
+ ├── Auth
+ ├── Storage
+ ├── Edge Functions
+ ├── pg_cron
+ └── pg_net
+        │
+ ├── Mercado Pago
+ └── Resend
 ```
 
-## Roles disponibles
+---
 
-La app usa un `AuthContext` mock con dos roles:
+## Documentación
 
-- `player`
-- `admin`
+La documentación funcional oficial del proyecto se encuentra en:
 
-El selector visible en la barra superior permite alternar entre Jugador y Admin sin autenticacion real.
+```
+docs/estructura.md
+docs/formatos.md
+```
 
-## Rutas principales
-
-Jugador:
-
-- `/player`
-- `/player/tournaments`
-- `/player/tournaments/:id`
-- `/player/tournaments/:id/register`
-- `/player/ranking`
-- `/player/matches`
-- `/player/notifications`
-- `/player/profile`
-
-Administrador:
-
-- `/admin`
-- `/admin/tournaments`
-- `/admin/tournaments/new`
-- `/admin/players`
-- `/admin/ranking`
-- `/admin/categories`
-- `/admin/matches`
-- `/admin/discipline`
-- `/admin/notifications`
-- `/admin/settings`
-
-## Datos mock
-
-Los datos estan centralizados en:
-
-- `src/mocks/mockPlayers.js`
-- `src/mocks/mockTournaments.js`
-- `src/mocks/mockMatches.js`
-- `src/mocks/mockRankings.js`
-- `src/mocks/mockNotifications.js`
-- `src/mocks/mockCategories.js`
-- `src/mocks/mockDiscipline.js`
-
-Los services dentro de `src/services/` consumen esos mocks y quedan preparados para reemplazarse por Supabase, Mercado Pago y backend real en proximas etapas.
-
-## Estado actual
-
-Implementado:
-
-- Arquitectura base del frontend.
-- Layout mobile-first para jugador con navegacion inferior.
-- Layout administrador con sidebar en escritorio y navegacion adaptada en movil.
-- Dashboard del jugador.
-- Torneos, detalle e inscripcion mock por pasos.
-- Ranking por categoria con perfil deportivo mock.
-- Mis partidos.
-- Centro de notificaciones.
-- Perfil del jugador.
-- Dashboard administrador.
-- Gestion visual de torneos y asistente de nuevo torneo.
-- Gestion visual de jugadores.
-- Gestion visual de categorias.
-- Ranking admin con historial de puntos.
-- Listado general de partidos con filtros.
-- Modulo disciplinario mock.
-- Configuracion general mock.
-
-Pendiente para siguientes etapas:
-
-- Supabase Auth y base de datos.
-- Mercado Pago real.
-- Notificaciones push/email.
-- Algoritmos definitivos de preliminares, zonas, llaves, cabezas de serie y cronograma.
-- Persistencia real de formularios y acciones administrativas.
-
-## Documentacion funcional
-
-`docs/estructura.md` es la fuente funcional oficial del proyecto y no debe modificarse desde el desarrollo de frontend.
+Estos documentos representan la especificación funcional del sistema y constituyen la fuente principal de las reglas de negocio del proyecto.
