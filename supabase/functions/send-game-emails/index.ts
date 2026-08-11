@@ -61,18 +61,26 @@ Deno.serve(async (req) => {
     }, 200, cors);
   } catch (error) {
     console.error("[GAME Email] process failed", safeError(error));
-    return json({ error: "GAME_EMAIL_PROCESS_FAILED", message: error instanceof Error ? error.message : "Unknown error" }, 500, cors);
+    const status = error instanceof GameEmailError ? error.status : 500;
+    return json({
+      error: error instanceof GameEmailError ? error.message : "GAME_EMAIL_PROCESS_FAILED",
+      message: error instanceof Error ? error.message : "Unknown error",
+    }, status, cors);
   }
 });
 
 async function assertCanProcess(req: Request, serviceClient: any) {
-  const configuredSecret = String(Deno.env.get("GAME_CRON_SECRET") || "").trim();
   const requestSecret = String(req.headers.get("x-game-cron-secret") || "").trim();
-  if (configuredSecret && requestSecret && configuredSecret === requestSecret) return;
+  if (requestSecret) {
+    const configuredSecret = String(Deno.env.get("GAME_CRON_SECRET") || "").trim();
+    if (!configuredSecret) throw new GameEmailError("CRON_SECRET_NOT_CONFIGURED", 500);
+    if (await timingSafeEqualText(configuredSecret, requestSecret)) return;
+    throw new GameEmailError("CRON_SECRET_INVALID", 403);
+  }
 
   const authHeader = req.headers.get("Authorization") || "";
   const token = authHeader.replace("Bearer ", "").trim();
-  if (!token) throw new Error("AUTH_REQUIRED");
+  if (!token) throw new GameEmailError("AUTH_REQUIRED", 401);
 
   const supabaseUrl = mustEnv("SUPABASE_URL");
   const anonKey = mustEnv("SUPABASE_ANON_KEY");
@@ -80,7 +88,7 @@ async function assertCanProcess(req: Request, serviceClient: any) {
     global: { headers: { Authorization: `Bearer ${token}` } },
   });
   const { data: authData, error: authError } = await userClient.auth.getUser();
-  if (authError || !authData.user) throw new Error("AUTH_REQUIRED");
+  if (authError || !authData.user) throw new GameEmailError("AUTH_REQUIRED", 401);
 
   const { data: profile, error: profileError } = await serviceClient
     .from("profiles")
@@ -88,7 +96,32 @@ async function assertCanProcess(req: Request, serviceClient: any) {
     .eq("auth_user_id", authData.user.id)
     .maybeSingle();
   if (profileError) throw profileError;
-  if (profile?.role !== "admin") throw new Error("ADMIN_REQUIRED");
+  if (profile?.role !== "admin") throw new GameEmailError("ADMIN_REQUIRED", 403);
+}
+
+class GameEmailError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "GameEmailError";
+    this.status = status;
+  }
+}
+
+async function timingSafeEqualText(left: string, right: string) {
+  const encoder = new TextEncoder();
+  const [leftHash, rightHash] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(left)),
+    crypto.subtle.digest("SHA-256", encoder.encode(right)),
+  ]);
+  const leftBytes = new Uint8Array(leftHash);
+  const rightBytes = new Uint8Array(rightHash);
+  let diff = leftBytes.length ^ rightBytes.length;
+  for (let index = 0; index < leftBytes.length; index += 1) {
+    diff |= leftBytes[index] ^ rightBytes[index];
+  }
+  return diff === 0;
 }
 
 async function sendDelivery(serviceClient: any, resendApiKey: string, from: string, appUrl: string, delivery: Delivery) {
@@ -151,14 +184,17 @@ function buildMessage(appUrl: string, delivery: Delivery) {
   const link = `${appUrl}${textValue(payload.linkPath, "/player")}`;
 
   if (delivery.event_type === "match_suspended") {
+    const newSchedule = formatArgentinaDateTime(String(payload.newScheduledAt || ""));
     return wrapMessage({
-      subject: "Tu partido ha sido suspendido | GAME",
-      title: "TU PARTIDO HA SIDO SUSPENDIDO",
+      appUrl,
+      subject: payload.newScheduledAt ? "Tu partido fue reprogramado | GAME" : "Tu partido ha sido suspendido | GAME",
+      title: payload.newScheduledAt ? "TU PARTIDO FUE REPROGRAMADO" : "TU PARTIDO HA SIDO SUSPENDIDO",
       body: [
-        "El partido que tenias programado fue suspendido.",
-        "Entra a GAME y actualiza los horarios en los que podes jugar para que podamos reprogramarlo.",
+        payload.newScheduledAt ? "El partido que tenias programado tiene nueva fecha." : "El partido que tenias programado fue suspendido.",
+        payload.newScheduledAt ? `Nueva fecha y hora: ${newSchedule.date} ${newSchedule.time}.` : "Entra a GAME y actualiza los horarios en los que podes jugar para que podamos reprogramarlo.",
+        textValue(payload.court, "") ? `Cancha: ${textValue(payload.court, "")}.` : "",
       ],
-      button: "ACTUALIZAR DISPONIBILIDAD",
+      button: payload.newScheduledAt ? "VER PARTIDO" : "ACTUALIZAR DISPONIBILIDAD",
       link,
       playerName,
     });
@@ -166,6 +202,7 @@ function buildMessage(appUrl: string, delivery: Delivery) {
 
   if (delivery.event_type === "tournament_open") {
     return wrapMessage({
+      appUrl,
       subject: `Inscripciones abiertas: ${tournamentName} | GAME`,
       title: `LA INSCRIPCION PARA ${tournamentName} YA COMENZO`,
       body: ["Ya podes inscribirte desde tu cuenta en GAME."],
@@ -176,21 +213,63 @@ function buildMessage(appUrl: string, delivery: Delivery) {
   }
 
   if (delivery.event_type === "payment_deadline_7d") {
+    const dueAt = formatArgentinaDateTime(String(payload.paymentDueAt || ""));
     return wrapMessage({
       subject: `Estan por cerrar las inscripciones de ${tournamentName} | GAME`,
       title: "ESTAN POR CERRAR LAS INSCRIPCIONES",
+      appUrl,
       body: [
         `Tu inscripcion a ${tournamentName} todavia tiene un pago pendiente.`,
+        payload.amount ? `Importe pendiente: ${textValue(payload.amount, "")}.` : "",
+        payload.paymentDueAt ? `Vencimiento: ${dueAt.date}.` : "",
         "Recorda completar el pago antes del cierre de inscripciones.",
         "Una vez cerradas las inscripciones, las inscripciones que continuen impagas seran eliminadas automaticamente del torneo segun las reglas actuales de GAME.",
-      ],
+      ].filter(Boolean),
       button: "PAGAR INSCRIPCION",
       link,
       playerName,
     });
   }
 
-  if (delivery.event_type === "match_reminder_1d") {
+  if (delivery.event_type === "payment_pending_reminder") {
+    const dueAt = formatArgentinaDateTime(String(payload.paymentDueAt || ""));
+    return wrapMessage({
+      appUrl,
+      subject: `Pago pendiente: ${tournamentName} | GAME`,
+      title: "TENES UN PAGO PENDIENTE",
+      body: [
+        `Tu inscripcion a ${tournamentName} sigue pendiente de pago.`,
+        payload.amount ? `Importe pendiente: ${textValue(payload.amount, "")}.` : "",
+        payload.paymentDueAt ? `Vencimiento: ${dueAt.date}.` : "",
+      ].filter(Boolean),
+      button: "PAGAR INSCRIPCION",
+      link,
+      playerName,
+    });
+  }
+
+  if (delivery.event_type === "match_programmed") {
+    const scheduledAt = formatArgentinaDateTime(String(payload.scheduledAt || ""));
+    const rivalName = textValue(payload.rivalName, "");
+    const court = textValue(payload.court, "");
+    return wrapMessage({
+      appUrl,
+      subject: `Partido programado: ${tournamentName} | GAME`,
+      title: "PARTIDO PROGRAMADO",
+      body: [
+        rivalName ? `Rival: ${rivalName}.` : "",
+        `Torneo: ${tournamentName}.`,
+        textValue(payload.categoryName, "") ? `Categoria: ${textValue(payload.categoryName, "")}.` : "",
+        `Fecha y hora: ${scheduledAt.date} ${scheduledAt.time}.`,
+        court ? `Cancha: ${court}.` : "",
+      ].filter(Boolean),
+      button: "VER PARTIDO",
+      link,
+      playerName,
+    });
+  }
+
+  if (delivery.event_type === "match_reminder_1d" || delivery.event_type === "match_reminder_24h") {
     const scheduledAt = formatArgentinaDateTime(String(payload.scheduledAt || ""));
     const rivalName = textValue(payload.rivalName, "");
     const court = textValue(payload.court, "");
@@ -198,6 +277,7 @@ function buildMessage(appUrl: string, delivery: Delivery) {
       ? `Tenes un partido programado para manana a las ${scheduledAt.time} contra ${rivalName}.`
       : `Tenes un partido programado para manana a las ${scheduledAt.time}.`;
     return wrapMessage({
+      appUrl,
       subject: "A darlo todo! Manana tenes partido | GAME",
       title: "A DARLO TODO!",
       body: [
@@ -212,7 +292,53 @@ function buildMessage(appUrl: string, delivery: Delivery) {
     });
   }
 
+  if (delivery.event_type === "bracket_published" || delivery.event_type === "results_published") {
+    return wrapMessage({
+      appUrl,
+      subject: `Cuadro actualizado: ${tournamentName} | GAME`,
+      title: "CUADRO Y RESULTADOS ACTUALIZADOS",
+      body: [
+        `Ya esta publicada una actualizacion importante de ${tournamentName}.`,
+        "Podes revisar el cuadro y los resultados desde GAME.",
+      ],
+      button: "VER TORNEO",
+      link,
+      playerName,
+    });
+  }
+
+  if (delivery.event_type === "photo_album_published") {
+    return wrapMessage({
+      appUrl,
+      subject: "Fotos disponibles | GAME",
+      title: "YA ESTAN DISPONIBLES LAS FOTOS",
+      body: [
+        `El album ${textValue(payload.albumTitle, "GAME")} ya esta publicado.`,
+        "Entrá para ver las fotografias disponibles.",
+      ],
+      button: "VER ALBUM",
+      link,
+      playerName,
+    });
+  }
+
+  if (delivery.event_type === "tournament_winner") {
+    return wrapMessage({
+      appUrl,
+      subject: `Felicitaciones, campeon de ${tournamentName}! | GAME`,
+      title: "FELICITACIONES CAMPEON",
+      body: [
+        `Ganaste ${tournamentName}.`,
+        "Tu titulo ya quedo registrado en GAME.",
+      ],
+      button: "VER TORNEO",
+      link,
+      playerName,
+    });
+  }
+
   return wrapMessage({
+    appUrl,
     subject: "Novedad de GAME",
     title: "NOVEDAD DE GAME",
     body: ["Tenes una nueva notificacion en GAME."],
@@ -222,12 +348,17 @@ function buildMessage(appUrl: string, delivery: Delivery) {
   });
 }
 
-function wrapMessage({ subject, title, body, button, link, playerName }: any) {
+function wrapMessage({ appUrl, subject, title, body, button, link, playerName }: any) {
   const greeting = playerName ? `<p>Hola ${escapeHtml(playerName)},</p>` : "";
-  const paragraphs = body.map((line: string) => `<p>${escapeHtml(line)}</p>`).join("");
+  const bodyLines = body.filter(Boolean);
+  const paragraphs = bodyLines.map((line: string) => `<p>${escapeHtml(line)}</p>`).join("");
+  const logoUrl = `${String(appUrl || "").replace(/\/+$/, "")}/logomail.png`;
   const html = `
     <div style="margin:0;padding:28px;background:#070809;color:#f5f7f8;font-family:Arial,sans-serif">
       <div style="max-width:620px;margin:0 auto;border:1px solid #cfdb2f;border-radius:18px;padding:28px;background:#101216">
+        <div style="margin:0 0 22px;text-align:center">
+          <img src="${escapeHtml(logoUrl)}" alt="GAME" style="max-width:150px;height:auto" />
+        </div>
         <h1 style="margin:0 0 18px;color:#cfdb2f;font-size:24px">${escapeHtml(title)}</h1>
         ${greeting}
         ${paragraphs}
@@ -240,7 +371,7 @@ function wrapMessage({ subject, title, body, button, link, playerName }: any) {
   const text = [
     title,
     playerName ? `Hola ${playerName},` : "",
-    ...body,
+    ...bodyLines,
     `${button}: ${link}`,
   ].filter(Boolean).join("\n\n");
   return { subject, html, text };

@@ -67,6 +67,8 @@ export function PlayerTournamentsPage() {
   if (loading) return <LoadingState message="Cargando torneos..." />;
   if (error) return <ErrorState title="No pudimos cargar los torneos." onRetry={reload} />;
 
+  const missingTournamentProfileData = !currentPlayer?.gender || !currentPlayer?.categoryId;
+
   return (
     <div className="page-stack">
       <header className="page-header page-header--wide">
@@ -79,6 +81,12 @@ export function PlayerTournamentsPage() {
         <ListFilter size={18} />
         <Tabs tabs={filters} activeTab={filter} onChange={setFilter} />
       </div>
+
+      {missingTournamentProfileData ? (
+        <div className="info-band info-band--warning">
+          <strong>Completá tu sexo y categoría actual para ver los torneos disponibles.</strong>
+        </div>
+      ) : null}
 
       {filteredTournaments.length ? (
         <div className="tournament-grid">

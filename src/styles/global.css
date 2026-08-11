@@ -2932,17 +2932,26 @@ button.admin-table-row {
   align-items: center;
 }
 
+.registration-modal__intro {
+  display: grid;
+  gap: 2px;
+  margin-top: calc(var(--space-2) * -1);
+  color: var(--color-muted);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
 .registration-steps span {
-  min-height: 34px;
+  min-height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0 var(--space-2);
+  padding: 0 10px;
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.035);
   color: var(--color-muted);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -2968,6 +2977,83 @@ button.admin-table-row {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.025);
+}
+
+.registration-panel--payment {
+  gap: var(--space-3);
+}
+
+.registration-modal .wizard-actions {
+  justify-content: space-between;
+}
+
+.payment-summary-compact {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.payment-summary-compact span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  color: var(--color-text);
+  font-weight: 850;
+}
+
+.payment-summary-compact strong {
+  color: var(--color-muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.payment-choice-section,
+.payment-free-panel,
+.pay-later-block {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.payment-choice-title {
+  color: var(--color-text);
+  font-size: 1rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.payment-free-panel {
+  justify-items: center;
+  padding: var(--space-4);
+  border: 1px solid rgba(207, 219, 47, 0.38);
+  border-radius: var(--radius-sm);
+  background: rgba(207, 219, 47, 0.08);
+  text-align: center;
+}
+
+.payment-free-panel svg {
+  color: var(--color-green);
+}
+
+.payment-free-panel strong {
+  font-size: 1.1rem;
+}
+
+.payment-free-panel span,
+.pay-later-block span {
+  color: var(--color-muted);
+  font-size: 0.86rem;
+  font-weight: 750;
+}
+
+.pay-later-block {
+  justify-items: center;
+  padding-top: var(--space-1);
+  text-align: center;
 }
 
 .registration-success {
@@ -3155,6 +3241,15 @@ textarea {
 .category-pick-list {
   gap: var(--space-2);
   max-width: 620px;
+}
+
+.tournament-general-grid {
+  align-items: start;
+}
+
+.tournament-description-input {
+  min-height: 68px;
+  resize: vertical;
 }
 
 .category-pick-row {
@@ -3547,6 +3642,116 @@ button.preliminary-card--compact:hover {
 .profile-modal .avatar {
   margin: 0 auto var(--space-3);
   color: var(--color-green);
+}
+
+.payment-method-grid {
+  display: grid;
+  gap: var(--space-3);
+}
+
+@media (min-width: 760px) {
+  .payment-method-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.payment-method-card {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  min-height: 150px;
+  padding: var(--space-4);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.registration-modal .payment-method-card {
+  align-content: space-between;
+  min-height: 188px;
+}
+
+.registration-modal .payment-method-card svg {
+  color: var(--color-green);
+}
+
+.payment-method-card strong {
+  color: var(--color-text);
+}
+
+.registration-modal .payment-method-card strong {
+  font-size: 1.02rem;
+}
+
+.registration-modal .payment-method-kicker {
+  color: var(--color-muted);
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.registration-modal .payment-method-card__head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.registration-modal .payment-method-badge {
+  padding: 4px 7px;
+  border: 1px solid rgba(207, 219, 47, 0.4);
+  border-radius: var(--radius-sm);
+  background: rgba(207, 219, 47, 0.12);
+  color: var(--color-green);
+  font-size: 0.7rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.payment-method-price {
+  color: var(--color-green);
+  font-size: 1.15rem;
+  font-weight: 900;
+}
+
+.registration-modal .payment-method-price {
+  font-size: 1.45rem;
+}
+
+.mp-qr-panel {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid rgba(207, 219, 47, 0.45);
+  border-radius: var(--radius-sm);
+  background: rgba(207, 219, 47, 0.08);
+  text-align: center;
+}
+
+.mp-qr-panel div {
+  display: grid;
+  gap: 4px;
+}
+
+.mp-qr-panel img {
+  width: min(220px, 100%);
+  height: auto;
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: var(--space-2);
+}
+
+@media (max-width: 640px) {
+  .payment-summary-compact {
+    grid-template-columns: 1fr;
+  }
+
+  .registration-modal .payment-method-card button,
+  .payment-free-panel button,
+  .pay-later-block button {
+    width: 100%;
+  }
 }
 
 .payment-return-page {

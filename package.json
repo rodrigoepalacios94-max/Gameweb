@@ -10,9 +10,11 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.8",
+    "@tanstack/react-query": "^5.101.4",
     "@vitejs/plugin-react": "latest",
     "lottie-web": "^5.13.0",
     "lucide-react": "latest",
+    "qrcode": "^1.5.4",
     "react": "latest",
     "react-dom": "latest",
     "react-router-dom": "latest",

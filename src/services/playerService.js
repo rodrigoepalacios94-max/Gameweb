@@ -52,7 +52,7 @@ function mapPlayer(row) {
     dni: row.document || "",
     document: row.document || "",
     birthDate: row.birth_date || "",
-    gender: row.gender || category?.branch || "Masculino",
+    gender: row.gender || "",
     phone: row.phone || "",
     email: row.email || "",
     address: row.address || "",
@@ -200,14 +200,28 @@ async function attachDiscipline(players = []) {
   }
 }
 
-async function attachPlayerExtras(players = []) {
-  return attachDiscipline(await attachBenefits(players));
+async function attachPlayerExtras(players = [], { includeBenefits = true, includeDiscipline = true } = {}) {
+  const withBenefits = includeBenefits ? await attachBenefits(players) : players;
+  return includeDiscipline ? attachDiscipline(withBenefits) : withBenefits;
 }
 
 function normalizeOptionalDigits(value, { message, code, field }) {
   const raw = String(value ?? "").trim();
   if (!raw) return null;
   if (!/^\d+$/.test(raw)) throw createDataError(message, { code, field });
+  return raw;
+}
+
+function normalizeRequiredDigits(value, { requiredMessage, invalidMessage, code, field }) {
+  const raw = String(value ?? "").trim();
+  if (!raw) throw createDataError(requiredMessage, { code: `${code}_REQUIRED`, field });
+  if (!/^\d+$/.test(raw)) throw createDataError(invalidMessage, { code, field });
+  return raw;
+}
+
+function normalizeRequiredText(value, { message, code, field }) {
+  const raw = String(value ?? "").trim();
+  if (!raw) throw createDataError(message, { code, field });
   return raw;
 }
 
@@ -225,26 +239,62 @@ function normalizeOptionalDate(value) {
   return raw;
 }
 
+function normalizeRequiredDate(value) {
+  const raw = String(value || "").trim();
+  if (!raw) throw createDataError("INGRESA UNA FECHA DE NACIMIENTO", { code: "PLAYER_BIRTH_DATE_REQUIRED", field: "birthDate" });
+  return normalizeOptionalDate(raw);
+}
+
+function normalizeGender(value) {
+  const raw = String(value || "").trim();
+  if (!raw) throw createDataError("SELECCIONA TU SEXO", { code: "PLAYER_GENDER_REQUIRED", field: "gender" });
+  if (raw !== "Masculino" && raw !== "Femenino") {
+    throw createDataError("SELECCIONA MASCULINO O FEMENINO", { code: "PLAYER_GENDER_INVALID", field: "gender" });
+  }
+  return raw;
+}
+
+function normalizeRequiredCategoryId(value) {
+  const raw = String(value || "").trim();
+  if (!raw) throw createDataError("SELECCIONA UNA CATEGORIA", { code: "PLAYER_CATEGORY_REQUIRED", field: "categoryId" });
+  return raw;
+}
+
+async function ensureActiveCategory(client, categoryId) {
+  const id = normalizeRequiredCategoryId(categoryId);
+  const { data, error } = await client
+    .from("categories")
+    .select("id, is_active")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    logSupabaseDataError("player category validation", error);
+    throw createDataError("NO PUDIMOS VALIDAR LA CATEGORIA", { code: "PLAYER_CATEGORY_VALIDATE_FAILED", field: "categoryId", cause: error });
+  }
+  if (!data) throw createDataError("SELECCIONA UNA CATEGORIA VALIDA", { code: "PLAYER_CATEGORY_NOT_FOUND", field: "categoryId" });
+  if (!data.is_active) throw createDataError("SELECCIONA UNA CATEGORIA ACTIVA", { code: "PLAYER_CATEGORY_INACTIVE", field: "categoryId" });
+  return id;
+}
+
 function mapPlayerPayload(payload, { allowEmail = true } = {}) {
-  const firstName = String(payload.firstName ?? payload.first_name ?? "").trim();
-  const lastName = String(payload.lastName ?? payload.last_name ?? "").trim();
-  const document = normalizeOptionalDigits(payload.document ?? payload.dni, {
-    message: "EL DOCUMENTO SOLO PUEDE CONTENER NUMEROS",
+  const firstName = normalizeRequiredText(payload.firstName ?? payload.first_name, { message: "INGRESA TU NOMBRE", code: "PLAYER_FIRST_NAME_REQUIRED", field: "firstName" });
+  const lastName = normalizeRequiredText(payload.lastName ?? payload.last_name, { message: "INGRESA TU APELLIDO", code: "PLAYER_LAST_NAME_REQUIRED", field: "lastName" });
+  const document = normalizeRequiredDigits(payload.document ?? payload.dni, {
+    requiredMessage: "INGRESA TU DOCUMENTO",
+    invalidMessage: "EL DOCUMENTO SOLO PUEDE CONTENER NUMEROS",
     code: "PLAYER_DOCUMENT_DIGITS",
     field: "document",
   });
-  const phone = normalizeOptionalDigits(payload.phone, {
-    message: "EL TELEFONO SOLO PUEDE CONTENER NUMEROS",
+  const phone = normalizeRequiredDigits(payload.phone, {
+    requiredMessage: "INGRESA TU TELEFONO",
+    invalidMessage: "EL TELEFONO SOLO PUEDE CONTENER NUMEROS",
     code: "PLAYER_PHONE_DIGITS",
     field: "phone",
   });
   const email = normalizeEmail(payload.email);
-  const categoryId = payload.categoryId ?? payload.currentCategoryId ?? payload.current_category_id;
+  const categoryId = normalizeRequiredCategoryId(payload.categoryId ?? payload.currentCategoryId ?? payload.current_category_id);
 
-  if (!firstName) throw createDataError("INGRESA TU NOMBRE", { code: "PLAYER_FIRST_NAME_REQUIRED", field: "firstName" });
-  if (!lastName) throw createDataError("INGRESA TU APELLIDO", { code: "PLAYER_LAST_NAME_REQUIRED", field: "lastName" });
   if (allowEmail && !email) throw createDataError("INGRESA UN CORREO VALIDO", { code: "PLAYER_EMAIL_REQUIRED", field: "email" });
-  if (!categoryId && !payload.allowMissingCategory) throw createDataError("SELECCIONA UNA CATEGORIA", { code: "PLAYER_CATEGORY_REQUIRED", field: "categoryId" });
 
   const mapped = {
     first_name: firstName,
@@ -252,9 +302,9 @@ function mapPlayerPayload(payload, { allowEmail = true } = {}) {
     document: document || null,
     address: String(payload.address || "").trim() || null,
     phone: phone || null,
-    birth_date: normalizeOptionalDate(payload.birthDate || payload.birth_date),
-    gender: String(payload.gender || "").trim() || null,
-    current_category_id: categoryId || null,
+    birth_date: normalizeRequiredDate(payload.birthDate || payload.birth_date),
+    gender: normalizeGender(payload.gender),
+    current_category_id: categoryId,
   };
 
   if (allowEmail) mapped.email = email;
@@ -286,28 +336,28 @@ function mapPlayerUpdatePayload(updates, { allowEmail = true } = {}) {
   }
 
   if ("document" in updates || "dni" in updates) {
-    const document = normalizeOptionalDigits(updates.document ?? updates.dni, {
-      message: "EL DOCUMENTO SOLO PUEDE CONTENER NUMEROS",
+    mapped.document = normalizeRequiredDigits(updates.document ?? updates.dni, {
+      requiredMessage: "INGRESA TU DOCUMENTO",
+      invalidMessage: "EL DOCUMENTO SOLO PUEDE CONTENER NUMEROS",
       code: "PLAYER_DOCUMENT_DIGITS",
       field: "document",
     });
-    mapped.document = document || null;
   }
 
   if ("phone" in updates) {
-    const phone = normalizeOptionalDigits(updates.phone, {
-      message: "EL TELEFONO SOLO PUEDE CONTENER NUMEROS",
+    mapped.phone = normalizeRequiredDigits(updates.phone, {
+      requiredMessage: "INGRESA TU TELEFONO",
+      invalidMessage: "EL TELEFONO SOLO PUEDE CONTENER NUMEROS",
       code: "PLAYER_PHONE_DIGITS",
       field: "phone",
     });
-    mapped.phone = phone || null;
   }
 
   if ("address" in updates) mapped.address = String(updates.address || "").trim() || null;
-  if ("birthDate" in updates || "birth_date" in updates) mapped.birth_date = normalizeOptionalDate(updates.birthDate || updates.birth_date);
-  if ("gender" in updates) mapped.gender = String(updates.gender || "").trim() || null;
+  if ("birthDate" in updates || "birth_date" in updates) mapped.birth_date = normalizeRequiredDate(updates.birthDate || updates.birth_date);
+  if ("gender" in updates) mapped.gender = normalizeGender(updates.gender);
   if ("categoryId" in updates || "currentCategoryId" in updates || "current_category_id" in updates) {
-    mapped.current_category_id = updates.categoryId ?? updates.currentCategoryId ?? updates.current_category_id;
+    mapped.current_category_id = normalizeRequiredCategoryId(updates.categoryId ?? updates.currentCategoryId ?? updates.current_category_id);
   }
   if ("status" in updates) mapped.status = statusToDb[updates.status] || updates.status;
   if ("avatar" in updates || "avatarUrl" in updates || "avatar_url" in updates) {
@@ -367,7 +417,7 @@ function logDeletePlayerError(source = {}) {
   });
 }
 
-async function fetchPlayerBy(column, value, fallbackMessage) {
+async function fetchPlayerBy(column, value, fallbackMessage, options = {}) {
   const client = ensureSupabaseDataClient();
   const query = client.from("players").select(basePlayerSelect());
   const { data, error } = column === "email"
@@ -379,7 +429,7 @@ async function fetchPlayerBy(column, value, fallbackMessage) {
   }
   const player = mapPlayer(data);
   if (!player) return null;
-  return (await attachPlayerExtras([player]))[0];
+  return (await attachPlayerExtras([player], options))[0];
 }
 
 export const playerService = {
@@ -396,7 +446,7 @@ export const playerService = {
     return this.getPlayerById(profile.player_id);
   },
 
-  async getPlayers() {
+  async getPlayers(options = {}) {
     const client = ensureSupabaseDataClient();
     const { data, error } = await client
       .from("players")
@@ -407,17 +457,17 @@ export const playerService = {
       logSupabaseDataError("players list", error);
       throw createDataError("NO PUDIMOS CARGAR LOS JUGADORES", { cause: error });
     }
-    return attachPlayerExtras((data || []).map(mapPlayer));
+    return attachPlayerExtras((data || []).map(mapPlayer), options);
   },
 
-  async getPlayerById(id) {
-    return fetchPlayerBy("id", id, "NO PUDIMOS CARGAR EL JUGADOR");
+  async getPlayerById(id, options = {}) {
+    return fetchPlayerBy("id", id, "NO PUDIMOS CARGAR EL JUGADOR", options);
   },
 
-  async getPlayerByEmail(email) {
+  async getPlayerByEmail(email, options = {}) {
     const normalizedEmail = normalizeEmail(email);
     if (!normalizedEmail) return null;
-    return fetchPlayerBy("email", normalizedEmail, "NO PUDIMOS CARGAR EL JUGADOR");
+    return fetchPlayerBy("email", normalizedEmail, "NO PUDIMOS CARGAR EL JUGADOR", options);
   },
 
   async searchPlayers(query) {
@@ -429,6 +479,7 @@ export const playerService = {
   async createPlayer(payload, { createTemporaryAccess = false } = {}) {
     const client = ensureSupabaseDataClient();
     const mapped = mapPlayerPayload({ ...payload, status: payload.status || "Activo" });
+    mapped.current_category_id = await ensureActiveCategory(client, mapped.current_category_id);
     const { data, error } = await client
       .from("players")
       .insert(mapped)
@@ -478,7 +529,7 @@ export const playerService = {
   async updatePlayer(id, updates) {
     const client = ensureSupabaseDataClient();
     const mapped = mapPlayerUpdatePayload(updates, { allowEmail: "email" in updates });
-    const categoryChangeId = mapped.current_category_id || null;
+    const categoryChangeId = mapped.current_category_id ? await ensureActiveCategory(client, mapped.current_category_id) : null;
     if (categoryChangeId) delete mapped.current_category_id;
     if (!Object.keys(mapped).length && categoryChangeId) {
       const { error: categoryError } = await client.rpc("set_player_category", {
@@ -526,8 +577,8 @@ export const playerService = {
       phone: updates.phone,
       dni: updates.dni,
       address: updates.address ?? current?.address ?? "",
-      gender: updates.gender ?? current?.gender ?? "",
     };
+    if ("gender" in updates || current?.gender) payload.gender = updates.gender ?? current?.gender;
     if (current?.categoryId) payload.categoryId = current.categoryId;
     return this.updatePlayer(id, payload);
   },

@@ -44,6 +44,7 @@ export function PaymentReturnPage() {
   const [searchParams] = useSearchParams();
   const registrationId = searchParams.get("registration_id") || searchParams.get("external_reference") || "";
   const providerPaymentId = searchParams.get("payment_id") || searchParams.get("collection_id") || "";
+  const providerOrderId = searchParams.get("order_id") || searchParams.get("provider_order_id") || searchParams.get("merchant_order_id") || "";
   const [state, setState] = useState({ loading: true, data: null, error: "" });
   const [retrying, setRetrying] = useState(false);
 
@@ -56,7 +57,7 @@ export function PaymentReturnPage() {
       }
       setState({ loading: true, data: null, error: "" });
       try {
-        const data = await enrollmentService.getPaymentReturnStatus({ registrationId, providerPaymentId });
+        const data = await enrollmentService.getPaymentReturnStatus({ registrationId, providerPaymentId, providerOrderId });
         if (active) setState({ loading: false, data, error: "" });
       } catch (error) {
         if (active) setState({ loading: false, data: null, error: error.cause?.message || error.message || "No pudimos verificar el pago." });
@@ -66,7 +67,7 @@ export function PaymentReturnPage() {
     return () => {
       active = false;
     };
-  }, [registrationId, providerPaymentId]);
+  }, [registrationId, providerPaymentId, providerOrderId]);
 
   async function retryPayment() {
     if (!registrationId) return;

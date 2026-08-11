@@ -77,7 +77,14 @@ export function CompleteGoogleProfilePage() {
     setGeneralError("");
     if (!form.firstName.trim()) return setFieldErrors({ firstName: "INGRESA TU NOMBRE" });
     if (!form.lastName.trim()) return setFieldErrors({ lastName: "INGRESA TU APELLIDO" });
-    if (!form.categoryId) return setFieldErrors({ categoryId: "SELECCIONA UNA CATEGORIA" });
+    if (!form.document.trim()) return setFieldErrors({ document: "INGRESA TU DOCUMENTO" });
+    if (!/^\d+$/.test(form.document.trim())) return setFieldErrors({ document: "EL DOCUMENTO SOLO PUEDE CONTENER NUMEROS" });
+    if (!form.phone.trim()) return setFieldErrors({ phone: "INGRESA TU TELEFONO" });
+    if (!/^\d+$/.test(form.phone.trim())) return setFieldErrors({ phone: "EL TELEFONO SOLO PUEDE CONTENER NUMEROS" });
+    if (!form.birthDate) return setFieldErrors({ birthDate: "INGRESA TU FECHA DE NACIMIENTO" });
+    if (!form.gender) return setFieldErrors({ gender: "SELECCIONA TU SEXO" });
+    if (!["Masculino", "Femenino"].includes(form.gender)) return setFieldErrors({ gender: "SELECCIONA MASCULINO O FEMENINO" });
+    if (!form.categoryId || !categories.some((category) => category.id === form.categoryId && category.status === "Activa")) return setFieldErrors({ categoryId: "SELECCIONA UNA CATEGORIA ACTIVA" });
     try {
       await completeGooglePlayerProfile(form);
       navigate("/player", { replace: true });
@@ -113,8 +120,9 @@ export function CompleteGoogleProfilePage() {
               <input inputMode="numeric" value={form.document} onChange={(event) => updateDigitsField("document", event.target.value)} />
               <FieldError message={fieldErrors.document} />
             </label>
-            <label>Fecha nacimiento
+            <label className={fieldErrors.birthDate ? "field-has-error" : ""}>Fecha nacimiento
               <input type="date" value={form.birthDate} onChange={(event) => updateField("birthDate", event.target.value)} />
+              <FieldError message={fieldErrors.birthDate} />
             </label>
             <label className={fieldErrors.phone ? "field-has-error" : ""}>Telefono
               <input inputMode="numeric" value={form.phone} onChange={(event) => updateDigitsField("phone", event.target.value)} />
@@ -123,13 +131,13 @@ export function CompleteGoogleProfilePage() {
             <label>Domicilio
               <input value={form.address} onChange={(event) => updateField("address", event.target.value)} />
             </label>
-            <label>Sexo
+            <label className={fieldErrors.gender ? "field-has-error" : ""}>Sexo
               <select value={form.gender} onChange={(event) => updateField("gender", event.target.value)}>
-                <option value="">No informado</option>
+                <option value="">Selecciona sexo</option>
                 <option value="Masculino">Masculino</option>
                 <option value="Femenino">Femenino</option>
-                <option value="Mixto">Mixto</option>
               </select>
+              <FieldError message={fieldErrors.gender} />
             </label>
             <label className={fieldErrors.categoryId ? "field-has-error" : ""}>Categoria
               <select required value={form.categoryId} onChange={(event) => updateField("categoryId", event.target.value)}>

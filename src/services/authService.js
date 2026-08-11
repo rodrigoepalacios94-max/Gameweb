@@ -2,6 +2,7 @@ import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import { playerService } from "./playerService";
 
 const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || "";
+const PRODUCTION_APP_ORIGIN = "https://gametorneos.com";
 const LEGACY_GAME_STORAGE_KEYS = [
   "game_temp_auth_session",
   "game_temp_users",
@@ -57,9 +58,87 @@ function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
 }
 
+function normalizeRequiredText(value, message, code, field) {
+  const raw = String(value || "").trim();
+  if (!raw) throw createAuthError(message, code, field);
+  return raw;
+}
+
+function normalizeRequiredDigits(value, requiredMessage, invalidMessage, code, field) {
+  const raw = String(value || "").trim();
+  if (!raw) throw createAuthError(requiredMessage, `${code}_REQUIRED`, field);
+  if (!/^\d+$/.test(raw)) throw createAuthError(invalidMessage, code, field);
+  return raw;
+}
+
+function normalizeRequiredDate(value) {
+  const raw = String(value || "").trim();
+  if (!raw) throw createAuthError("INGRESA UNA FECHA DE NACIMIENTO", "PLAYER_BIRTH_DATE_REQUIRED", "birthDate");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    throw createAuthError("INGRESA UNA FECHA DE NACIMIENTO VALIDA", "PLAYER_BIRTH_DATE_INVALID", "birthDate");
+  }
+  const [year, month, day] = raw.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    throw createAuthError("INGRESA UNA FECHA DE NACIMIENTO VALIDA", "PLAYER_BIRTH_DATE_INVALID", "birthDate");
+  }
+  return raw;
+}
+
+function normalizeGender(value) {
+  const raw = String(value || "").trim();
+  if (!raw) throw createAuthError("SELECCIONA TU SEXO", "PLAYER_GENDER_REQUIRED", "gender");
+  if (raw !== "Masculino" && raw !== "Femenino") {
+    throw createAuthError("SELECCIONA MASCULINO O FEMENINO", "PLAYER_GENDER_INVALID", "gender");
+  }
+  return raw;
+}
+
+async function ensureActiveCategory(categoryId) {
+  const id = String(categoryId || "").trim();
+  if (!id) throw createAuthError("SELECCIONA UNA CATEGORIA", "PLAYER_CATEGORY_REQUIRED", "categoryId");
+  const { data, error } = await supabase
+    .from("categories")
+    .select("id, is_active")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    logAuthTechnicalError("category validation", error);
+    throw createAuthError("NO PUDIMOS VALIDAR LA CATEGORIA", "PLAYER_CATEGORY_VALIDATE_FAILED", "categoryId", error);
+  }
+  if (!data) throw createAuthError("SELECCIONA UNA CATEGORIA VALIDA", "PLAYER_CATEGORY_NOT_FOUND", "categoryId");
+  if (!data.is_active) throw createAuthError("SELECCIONA UNA CATEGORIA ACTIVA", "PLAYER_CATEGORY_INACTIVE", "categoryId");
+  return id;
+}
+
 function buildAuthRedirect(path) {
-  if (typeof window === "undefined" || !window.location?.origin) return path;
-  return new URL(path, window.location.origin).toString();
+  return new URL(path, getAuthRedirectOrigin()).toString();
+}
+
+function getAuthRedirectOrigin() {
+  if (typeof window !== "undefined" && window.location?.origin && isLocalOrigin(window.location.origin)) {
+    return window.location.origin;
+  }
+  return normalizeOrigin(import.meta.env.VITE_APP_URL) || PRODUCTION_APP_ORIGIN;
+}
+
+function isLocalOrigin(origin) {
+  try {
+    const { hostname } = new URL(origin);
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
+  }
+}
+
+function normalizeOrigin(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return "";
+  }
 }
 
 function buildAdminUser(authUser, profile) {
@@ -272,6 +351,10 @@ export const authService = {
 
   getSafeAuthMessage,
 
+  buildAppUrl(path) {
+    return buildAuthRedirect(path);
+  },
+
   getInitialSession() {
     return emptySession;
   },
@@ -334,9 +417,22 @@ export const authService = {
   async registerPlayer(payload) {
     ensureSupabaseConfigured();
     const email = normalizeEmail(payload.email);
+    if (!email) throw createAuthError("INGRESA UN CORREO VALIDO", "PLAYER_EMAIL_REQUIRED", "email");
+    const firstName = normalizeRequiredText(payload.firstName, "INGRESA TU NOMBRE", "PLAYER_FIRST_NAME_REQUIRED", "firstName");
+    const lastName = normalizeRequiredText(payload.lastName, "INGRESA TU APELLIDO", "PLAYER_LAST_NAME_REQUIRED", "lastName");
+    const document = normalizeRequiredDigits(payload.document, "INGRESA TU DOCUMENTO", "EL DOCUMENTO SOLO PUEDE CONTENER NUMEROS", "PLAYER_DOCUMENT_DIGITS", "document");
+    const phone = normalizeRequiredDigits(payload.phone, "INGRESA TU TELEFONO", "EL TELEFONO SOLO PUEDE CONTENER NUMEROS", "PLAYER_PHONE_DIGITS", "phone");
+    const birthDate = normalizeRequiredDate(payload.birthDate);
+    const gender = normalizeGender(payload.gender);
+    const categoryId = await ensureActiveCategory(payload.categoryId);
+    if (!payload.password) throw createAuthError("COMPLETA ESTE CAMPO", "PLAYER_PASSWORD_REQUIRED", "password");
+    if (!payload.repeatPassword) throw createAuthError("COMPLETA ESTE CAMPO", "PLAYER_REPEAT_PASSWORD_REQUIRED", "repeatPassword");
+    if (payload.password !== payload.repeatPassword) {
+      throw createAuthError("LAS CONTRASENAS NO COINCIDEN", "PLAYER_PASSWORD_MISMATCH", "repeatPassword");
+    }
     const { data: uniqueness, error: uniquenessError } = await supabase.rpc("check_signup_uniqueness", {
       p_email: email,
-      p_document: String(payload.document || "").trim() || null,
+      p_document: document,
     });
     if (uniquenessError) {
       logAuthTechnicalError("signup uniqueness check", uniquenessError);
@@ -356,14 +452,14 @@ export const authService = {
         emailRedirectTo: redirectTo,
         data: {
           game_role: "player",
-          first_name: String(payload.firstName || "").trim(),
-          last_name: String(payload.lastName || "").trim(),
-          document: String(payload.document || "").trim() || null,
+          first_name: firstName,
+          last_name: lastName,
+          document,
           address: String(payload.address || "").trim() || null,
-          phone: String(payload.phone || "").trim() || null,
-          birth_date: payload.birthDate || null,
-          gender: payload.gender || null,
-          category_id: payload.categoryId,
+          phone,
+          birth_date: birthDate,
+          gender,
+          category_id: categoryId,
         },
       },
     });
@@ -388,15 +484,22 @@ export const authService = {
 
   async completeGooglePlayerProfile(payload) {
     ensureSupabaseConfigured();
+    const firstName = normalizeRequiredText(payload.firstName, "INGRESA TU NOMBRE", "PLAYER_FIRST_NAME_REQUIRED", "firstName");
+    const lastName = normalizeRequiredText(payload.lastName, "INGRESA TU APELLIDO", "PLAYER_LAST_NAME_REQUIRED", "lastName");
+    const document = normalizeRequiredDigits(payload.document, "INGRESA TU DOCUMENTO", "EL DOCUMENTO SOLO PUEDE CONTENER NUMEROS", "PLAYER_DOCUMENT_DIGITS", "document");
+    const phone = normalizeRequiredDigits(payload.phone, "INGRESA TU TELEFONO", "EL TELEFONO SOLO PUEDE CONTENER NUMEROS", "PLAYER_PHONE_DIGITS", "phone");
+    const birthDate = normalizeRequiredDate(payload.birthDate);
+    const gender = normalizeGender(payload.gender);
+    const categoryId = await ensureActiveCategory(payload.categoryId);
     const { data, error } = await supabase.rpc("complete_google_player_profile", {
-      p_first_name: String(payload.firstName || "").trim(),
-      p_last_name: String(payload.lastName || "").trim(),
-      p_document: String(payload.document || "").trim() || null,
+      p_first_name: firstName,
+      p_last_name: lastName,
+      p_document: document,
       p_address: String(payload.address || "").trim() || null,
-      p_phone: String(payload.phone || "").trim() || null,
-      p_birth_date: payload.birthDate || null,
-      p_gender: payload.gender || null,
-      p_category_id: payload.categoryId || null,
+      p_phone: phone,
+      p_birth_date: birthDate,
+      p_gender: gender,
+      p_category_id: categoryId,
     });
     if (error) {
       logAuthTechnicalError("complete google profile", error);
@@ -459,7 +562,7 @@ export const authService = {
           callback(emptySession);
           return;
         }
-        if (event === "SIGNED_IN" || event === "PASSWORD_RECOVERY" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED" || event === "INITIAL_SESSION") {
+        if (event === "SIGNED_IN" || event === "PASSWORD_RECOVERY" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
           callback(await resolveSession(session));
         }
       } catch (error) {

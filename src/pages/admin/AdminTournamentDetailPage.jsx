@@ -28,32 +28,60 @@ import { getVisibleTournamentDescription } from "../../utils/tournamentDescripti
 
 const FINAL_MATCH_STATUSES = new Set(["Finalizado", "W.O.", "W.O"]);
 
-function logTournamentDetailLoadError(error) {
+function logTournamentDetailLoadError(error, stage = "unknown") {
   if (!import.meta.env.DEV || !error) return;
   const source = error.cause || error;
-  console.error("[GAME Admin] tournament detail load error", {
-    table: source.table || null,
-    select: source.select || null,
-    filters: source.filter || null,
-    code: source.code || null,
-    message: source.message || error.message || null,
-    details: source.details || null,
-    hint: source.hint || null,
-    status: source.status || null,
-  });
+  console.error(
+    "[GAME Admin] tournament detail load error",
+    JSON.stringify({
+      stage: error.stage ?? source.stage ?? stage ?? null,
+      table: error.table ?? source.table ?? null,
+      select: error.select ?? source.select ?? null,
+      filters: error.filters ?? error.filter ?? source.filters ?? source.filter ?? null,
+      code: error.code ?? source.code ?? null,
+      message: error.message ?? source.message ?? null,
+      details: error.details ?? source.details ?? null,
+      hint: error.hint ?? source.hint ?? null,
+      status: error.status ?? source.status ?? null,
+      name: error.name ?? source.name ?? null,
+      causeName: source !== error ? source.name ?? null : null,
+      causeMessage: source !== error ? source.message ?? null : null,
+    }, null, 2)
+  );
 }
 
 async function loadOptional(label, loader, fallback) {
   try {
     return await loader();
   } catch (error) {
-    console.error(`[GAME Admin] ${label}`, {
-      code: error.code || error.cause?.code || null,
-      message: error.message || error.cause?.message || null,
-      details: error.details || error.cause?.details || null,
-      hint: error.hint || error.cause?.hint || null,
-    });
+    const source = error.cause || error;
+    console.error(
+      `[GAME Admin] ${label}`,
+      JSON.stringify({
+        stage: label,
+        table: error.table ?? source.table ?? null,
+        select: error.select ?? source.select ?? null,
+        filters: error.filters ?? error.filter ?? source.filters ?? source.filter ?? null,
+        code: error.code ?? source.code ?? null,
+        message: error.message ?? source.message ?? null,
+        details: error.details ?? source.details ?? null,
+        hint: error.hint ?? source.hint ?? null,
+        status: error.status ?? source.status ?? null,
+        name: error.name ?? source.name ?? null,
+        causeName: source !== error ? source.name ?? null : null,
+        causeMessage: source !== error ? source.message ?? null : null,
+      }, null, 2)
+    );
     return fallback;
+  }
+}
+
+async function loadRequired(label, loader) {
+  try {
+    return await loader();
+  } catch (error) {
+    error.stage = label;
+    throw error;
   }
 }
 
@@ -94,7 +122,7 @@ export function AdminTournamentDetailPage() {
   const [registrationActionBusy, setRegistrationActionBusy] = useState(false);
   const { data, loading, error, reload } = useAsyncData(async () => {
     try {
-      const tournament = await tournamentService.getTournamentById(id);
+      const tournament = await loadRequired("tournament", () => tournamentService.getTournamentById(id));
       const stages = tournament
         ? await loadOptional("tournament stages", () => tournamentService.getTournamentCategoryStages(id), tournament.categoryStages || [])
         : [];
@@ -291,7 +319,23 @@ export function AdminTournamentDetailPage() {
       setSettingsOpen(false);
       navigate("/admin/tournaments");
     } catch (error) {
-      setDeleteError(error.cause?.message || error.message || "No pudimos eliminar el torneo.");
+      if (import.meta.env.DEV) {
+        const source = error.cause || error;
+        console.error(
+          "[GAME Admin] tournament delete modal error",
+          JSON.stringify({
+            table: error.table ?? source.table ?? null,
+            filters: error.filters ?? error.filter ?? source.filters ?? source.filter ?? null,
+            code: error.code ?? source.code ?? null,
+            message: error.message ?? source.message ?? null,
+            details: error.details ?? source.details ?? null,
+            hint: error.hint ?? source.hint ?? null,
+            status: error.status ?? source.status ?? null,
+            name: error.name ?? source.name ?? null,
+          }, null, 2)
+        );
+      }
+      setDeleteError("No pudimos eliminar el torneo. Intentá nuevamente.");
     } finally {
       setDeletingTournament(false);
     }

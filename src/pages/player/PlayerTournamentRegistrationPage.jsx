@@ -7,6 +7,7 @@ import { Card } from "../../components/common/Card";
 import { ErrorState } from "../../components/common/ErrorState";
 import { LoadingState } from "../../components/common/LoadingState";
 import { Tabs } from "../../components/common/Tabs";
+import { MercadoPagoQrPanel } from "../../components/tournaments/MercadoPagoQrPanel";
 import { useAuth } from "../../context/AuthContext";
 import { useAsyncData } from "../../hooks/useAsyncData";
 import { categoryService } from "../../services/categoryService";
@@ -31,6 +32,7 @@ export function PlayerTournamentRegistrationPage() {
   const [descentRequested, setDescentRequested] = useState(false);
   const [registrationError, setRegistrationError] = useState("");
   const [createdEnrollment, setCreatedEnrollment] = useState(null);
+  const [qrPayment, setQrPayment] = useState(null);
   const { data, loading, error, reload } = useAsyncData(async () => {
     const [tournament, tournamentCategories, categoryRules] = await Promise.all([
       tournamentService.getTournamentById(id),
@@ -59,10 +61,19 @@ export function PlayerTournamentRegistrationPage() {
 
   const { tournament, tournamentCategories, categoryRules, allowedCategories } = data;
   if (!tournament) return <Card>Torneo no encontrado.</Card>;
+  const missingTournamentProfileData = !user?.gender || !user?.categoryId;
+  if (missingTournamentProfileData) {
+    return (
+      <div className="page-stack">
+        <ErrorState title="Completá tu sexo y categoría actual para ver los torneos disponibles." />
+      </div>
+    );
+  }
   const isBlocked = user.status?.includes("Bloqueado");
   const benefit = user.benefit;
   const discount = benefit?.percentage || 0;
   const finalPrice = Math.max(0, Number(tournament.price || 0) * (100 - discount) / 100);
+  const qrFinalPrice = Math.max(0, Math.round(finalPrice * 0.95 * 100) / 100);
   const paymentDueAt = getPaymentDueAt(tournament);
   const payLaterAvailable = canPayLater(tournament);
 
@@ -83,6 +94,7 @@ export function PlayerTournamentRegistrationPage() {
 
   async function payNow() {
     setRegistrationError("");
+    setQrPayment(null);
     try {
       const result = await enrollmentService.startMercadoPagoCheckout({
         tournamentId: tournament.id,
@@ -104,6 +116,34 @@ export function PlayerTournamentRegistrationPage() {
       throw new Error("Mercado Pago no devolvio una URL de checkout.");
     } catch (error) {
       setRegistrationError(error.cause?.message || error.message || "No pudimos iniciar Mercado Pago.");
+    }
+  }
+
+  async function payQr() {
+    setRegistrationError("");
+    setQrPayment(null);
+    try {
+      const result = await enrollmentService.startMercadoPagoQr({
+        tournamentId: tournament.id,
+        playerId: user.id,
+        categoryIds: [selectedCategoryId],
+        categoryNames: { [selectedCategoryId]: selectedCategory ? `${selectedCategory.name} ${selectedCategory.branch}` : "" },
+        unitPrice: Number(tournament.price || 0),
+        benefitPercentage: discount,
+      }, user.id);
+      if (result.status === "waived") {
+        setCreatedEnrollment(result.enrollments?.[0] || null);
+        next();
+        return;
+      }
+      if (result.qrData) {
+        setCreatedEnrollment(result.enrollments?.[0] || null);
+        setQrPayment(result);
+        return;
+      }
+      throw new Error("Mercado Pago no devolvio los datos del QR.");
+    } catch (error) {
+      setRegistrationError(error.cause?.message || error.message || "No pudimos generar el QR de Mercado Pago.");
     }
   }
 
@@ -173,6 +213,7 @@ export function PlayerTournamentRegistrationPage() {
           <span>Precio: {formatCurrency(tournament.price)}</span>
             <span>Total: {formatCurrency(finalPrice)}</span>
             {paymentDueAt ? <span>Pagar después disponible hasta: {paymentDueAt.slice(0, 10)}</span> : null}
+            {finalPrice > 0 ? <span>QR dinamico: {formatCurrency(qrFinalPrice)} (5% menos pagando con QR)</span> : null}
             {discount ? <span>Beneficio: {discount}% de descuento. Total: {formatCurrency(finalPrice)}</span> : null}
             <span>Disponibilidad: se solicita antes de cada partido.</span>
           </div>
@@ -183,12 +224,27 @@ export function PlayerTournamentRegistrationPage() {
         <Card className="payment-card">
           <CreditCard size={34} />
           <h2>Mercado Pago</h2>
-          <p>Elegir pagar ahora abre Checkout Pro. Pagar después reserva el lugar con deuda pendiente.</p>
+          <p>Elegi Checkout o QR dinamico de Mercado Pago. Pagar despues reserva el lugar con deuda pendiente.</p>
           {registrationError ? <div className="form-alert">{registrationError}</div> : null}
-          {!payLaterAvailable ? <div className="form-alert">Pagar después ya no está disponible. Completá el pago para confirmar tu inscripción.</div> : null}
+          {qrPayment ? <MercadoPagoQrPanel payment={qrPayment} /> : null}
+          {!payLaterAvailable ? <div className="form-alert">Pagar despues ya no esta disponible. Completa el pago para confirmar tu inscripcion.</div> : null}
+          <div className="payment-method-grid">
+            <div className="payment-method-card">
+              <CreditCard size={28} />
+              <strong>Checkout Mercado Pago</strong>
+              <span className="payment-method-price">{formatCurrency(finalPrice)}</span>
+              <Button onClick={payNow} disabled={isBlocked || !selectedCategory}>Pagar con Checkout</Button>
+            </div>
+            <div className="payment-method-card">
+              <CreditCard size={28} />
+              <strong>QR dinamico Mercado Pago</strong>
+              <span className="payment-method-price">{formatCurrency(qrFinalPrice)}</span>
+              <span className="muted">5% menos pagando con QR</span>
+              <Button variant="outline-green" onClick={payQr} disabled={isBlocked || !selectedCategory}>{qrPayment ? "Continuar pago" : "Generar QR"}</Button>
+            </div>
+          </div>
           <div className="wizard-actions">
-            <Button variant="ghost" onClick={payLater} disabled={isBlocked || !selectedCategory || !payLaterAvailable}>Pagar después</Button>
-            <Button onClick={payNow} disabled={isBlocked || !selectedCategory}>Pagar ahora</Button>
+            <Button variant="ghost" onClick={payLater} disabled={isBlocked || !selectedCategory || !payLaterAvailable}>Pagar despues</Button>
           </div>
         </Card>
       ) : null}

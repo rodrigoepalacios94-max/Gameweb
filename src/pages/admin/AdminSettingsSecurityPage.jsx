@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { KeyRound } from "lucide-react";
+import { Link } from "react-router-dom";
+import { ArrowLeft, KeyRound } from "lucide-react";
 import { ChangePasswordModal } from "../../components/auth/ChangePasswordModal";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
@@ -9,6 +10,11 @@ export function AdminSettingsSecurityPage() {
 
   return (
     <div className="page-stack">
+      <Link className="back-link" to="/admin/settings">
+        <ArrowLeft size={18} />
+        <span>Volver</span>
+      </Link>
+
       <header className="page-header page-header--wide">
         <span className="eyebrow">Configuración</span>
         <h1>Seguridad</h1>

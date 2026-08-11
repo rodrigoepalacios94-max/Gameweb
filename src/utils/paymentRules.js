@@ -12,6 +12,11 @@ export const PAYMENT_STATUS = {
   WAIVED: "waived",
 };
 
+function normalizeDateInput(value, fallback = new Date()) {
+  const date = value instanceof Date ? value : new Date(value ?? fallback);
+  return Number.isNaN(date.getTime()) ? fallback : date;
+}
+
 export function parseTournamentStart(tournament) {
   const rawDate = tournament?.startDate || tournament?.start_at || tournament?.date;
   if (!rawDate) return null;
@@ -30,7 +35,7 @@ export function getPaymentDueAt(tournament) {
 export function canPayLater(tournament, now = new Date()) {
   const dueAt = getPaymentDueAt(tournament);
   if (!dueAt) return false;
-  return now.getTime() < new Date(dueAt).getTime();
+  return normalizeDateInput(now).getTime() < new Date(dueAt).getTime();
 }
 
 export function getCalendarYearEnd(date = new Date()) {
@@ -40,9 +45,10 @@ export function getCalendarYearEnd(date = new Date()) {
 
 export function isPaymentWaiverActive(waiver, date = new Date()) {
   if (!waiver || waiver.revokedAt || waiver.revoked_at) return false;
+  const currentDate = normalizeDateInput(date);
   const startsAt = new Date(`${waiver.startsAt || waiver.starts_at}T00:00:00${GAME_TIMEZONE_OFFSET}`);
   const endsAt = new Date(`${waiver.endsAt || waiver.ends_at}T23:59:59${GAME_TIMEZONE_OFFSET}`);
-  return startsAt.getTime() <= date.getTime() && date.getTime() <= endsAt.getTime();
+  return startsAt.getTime() <= currentDate.getTime() && currentDate.getTime() <= endsAt.getTime();
 }
 
 export function calculateRegistrationAmount({ unitPrice = 0, categoryIds = [], benefitPercentage = 0, waived = false }) {

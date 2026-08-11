@@ -131,6 +131,23 @@ function mapClaimRpcError(error) {
   return createDataError("No pudimos enviar el reclamo.", { cause: error });
 }
 
+async function getLatestUnblockByPlayerId(playerId) {
+  if (!playerId) return null;
+  const client = ensureSupabaseDataClient();
+  const { data, error } = await client
+    .from("player_discipline_unblocks")
+    .select("unblocked_at")
+    .eq("player_id", playerId)
+    .order("unblocked_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    logSupabaseDataError("discipline latest unblock", error);
+    throw createDataError("NO PUDIMOS CARGAR DESBLOQUEOS DISCIPLINARIOS", { cause: error });
+  }
+  return data?.unblocked_at || null;
+}
+
 export const disciplineService = {
   async getClaims(filters = {}) {
     const client = ensureSupabaseDataClient();
@@ -138,6 +155,7 @@ export const disciplineService = {
     if (filters.matchId) query = query.eq("match_id", filters.matchId);
     if (filters.tournamentId) query = query.eq("tournament_id", filters.tournamentId);
     if (filters.status) query = query.eq("status", filters.status);
+    if (filters.playerId) query = query.or(`reporter_player_id.eq.${filters.playerId},accused_player_id.eq.${filters.playerId}`);
     const { data, error } = await query;
     if (error) {
       logSupabaseDataError("discipline claims list", error);
@@ -161,15 +179,19 @@ export const disciplineService = {
   },
 
   async getPlayerDiscipline(playerId) {
-    const [claims, faults] = await Promise.all([
-      this.getClaims(),
+    const [claims, faults, lastUnblock] = await Promise.all([
+      this.getClaims({ playerId }),
       this.getFaults({ playerId }),
+      getLatestUnblockByPlayerId(playerId),
     ]);
-    const relatedClaims = claims.filter((claim) => claim.reporterPlayerId === playerId || claim.accusedPlayerId === playerId);
+    const activeFaults = lastUnblock
+      ? faults.filter((fault) => new Date(fault.createdAt || 0) > new Date(lastUnblock))
+      : faults;
     return {
-      claims: relatedClaims,
+      claims,
       faults,
-      status: faults.length >= 3 ? "Bloqueado" : faults.length ? "Seguimiento" : "Sin sanciones",
+      activeFaultCount: activeFaults.length,
+      status: activeFaults.length >= 3 ? "Bloqueado" : activeFaults.length ? "Seguimiento" : "Sin sanciones",
     };
   },
 

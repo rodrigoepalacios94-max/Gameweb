@@ -35,6 +35,15 @@ function getPlayerRedirectPath(location) {
   return fromPath?.startsWith("/player") ? fromPath : "/player";
 }
 
+function navigateAfterAuth(path, navigate) {
+  const targetUrl = authService.buildAppUrl(path);
+  if (typeof window === "undefined" || new URL(targetUrl).origin === window.location.origin) {
+    navigate(path, { replace: true });
+    return;
+  }
+  window.location.assign(targetUrl);
+}
+
 function FieldError({ message }) {
   return message ? <span className="field-error">{message}</span> : null;
 }
@@ -42,16 +51,21 @@ function FieldError({ message }) {
 function validateRegisterForm(form, categories) {
   if (!form.firstName.trim()) return { field: "firstName", message: "INGRESA TU NOMBRE" };
   if (!form.lastName.trim()) return { field: "lastName", message: "INGRESA TU APELLIDO" };
-  if (!emailPattern.test(form.email.trim())) return { field: "email", message: "INGRESA UN CORREO VÁLIDO" };
-  if (form.document.trim() && !/^\d+$/.test(form.document.trim())) return { field: "document", message: "EL DOCUMENTO SOLO PUEDE CONTENER NÚMEROS" };
-  if (form.phone.trim() && !/^\d+$/.test(form.phone.trim())) return { field: "phone", message: "EL TELÉFONO SOLO PUEDE CONTENER NÚMEROS" };
-  if (!form.categoryId || !categories.some((category) => category.id === form.categoryId)) return { field: "categoryId", message: "SELECCIONÁ UNA CATEGORÍA" };
+  if (!emailPattern.test(form.email.trim())) return { field: "email", message: "INGRESA UN CORREO VALIDO" };
+  if (!form.document.trim()) return { field: "document", message: "INGRESA TU DOCUMENTO" };
+  if (!/^\d+$/.test(form.document.trim())) return { field: "document", message: "EL DOCUMENTO SOLO PUEDE CONTENER NUMEROS" };
+  if (!form.phone.trim()) return { field: "phone", message: "INGRESA TU TELEFONO" };
+  if (!/^\d+$/.test(form.phone.trim())) return { field: "phone", message: "EL TELEFONO SOLO PUEDE CONTENER NUMEROS" };
+  if (!form.birthDate) return { field: "birthDate", message: "INGRESA TU FECHA DE NACIMIENTO" };
+  if (!form.gender) return { field: "gender", message: "SELECCIONA TU SEXO" };
+  if (!["Masculino", "Femenino"].includes(form.gender)) return { field: "gender", message: "SELECCIONA MASCULINO O FEMENINO" };
+  if (!form.categoryId || !categories.some((category) => category.id === form.categoryId && category.status === "Activa")) return { field: "categoryId", message: "SELECCIONA UNA CATEGORIA ACTIVA" };
   if (!form.password) return { field: "password", message: "COMPLETA ESTE CAMPO" };
   if (form.password.length < MIN_REGISTER_PASSWORD_LENGTH) {
-    return { field: "password", message: `LA CONTRASEÑA DEBE TENER AL MENOS ${MIN_REGISTER_PASSWORD_LENGTH} CARACTERES` };
+    return { field: "password", message: `LA CONTRASENA DEBE TENER AL MENOS ${MIN_REGISTER_PASSWORD_LENGTH} CARACTERES` };
   }
   if (!form.repeatPassword) return { field: "repeatPassword", message: "COMPLETA ESTE CAMPO" };
-  if (form.password !== form.repeatPassword) return { field: "repeatPassword", message: "LAS CONTRASEÑAS NO COINCIDEN" };
+  if (form.password !== form.repeatPassword) return { field: "repeatPassword", message: "LAS CONTRASENAS NO COINCIDEN" };
   return null;
 }
 
@@ -137,7 +151,7 @@ export function LoginPage() {
 
     try {
       const sessionState = await signInPlayer(playerForm);
-      navigate(sessionState.role === "player" ? getPlayerRedirectPath(location) : getTargetPath(sessionState.role), { replace: true });
+      navigateAfterAuth(sessionState.role === "player" ? getPlayerRedirectPath(location) : getTargetPath(sessionState.role), navigate);
     } catch (loginError) {
       if (loginError.field) setPlayerErrors({ [loginError.field]: loginError.message });
       else setPlayerGeneralError(loginError.message || error || "No pudimos iniciar sesión.");
@@ -161,7 +175,7 @@ export function LoginPage() {
     try {
       const sessionState = await signInAdmin({ password: adminPassword });
       setAdminOpen(false);
-      navigate(getTargetPath(sessionState.role), { replace: true });
+      navigateAfterAuth(getTargetPath(sessionState.role), navigate);
     } catch (loginError) {
       setAdminError(loginError.message || "CONTRASENA INCORRECTA");
     }
@@ -187,7 +201,7 @@ export function LoginPage() {
         return;
       }
       setRegisterOpen(false);
-      navigate(getTargetPath(sessionState.role), { replace: true });
+      navigateAfterAuth(getTargetPath(sessionState.role), navigate);
     } catch (registerError) {
       if (registerError.field) setRegisterErrors({ [registerError.field]: registerError.message });
       else setRegisterGeneralError(registerError.message || error || "No pudimos crear la cuenta.");
@@ -318,22 +332,23 @@ export function LoginPage() {
               <input inputMode="numeric" pattern="[0-9]*" value={registerForm.phone} onChange={(event) => updateDigitsField("phone", event.target.value)} />
               <FieldError message={registerErrors.phone} />
             </label>
-            <label>Fecha nacimiento
+            <label className={registerErrors.birthDate ? "field-has-error" : ""}>Fecha nacimiento
               <input type="date" value={registerForm.birthDate} onChange={(event) => updateRegisterField("birthDate", event.target.value)} />
+              <FieldError message={registerErrors.birthDate} />
             </label>
-            <label>Sexo
+            <label className={registerErrors.gender ? "field-has-error" : ""}>Sexo
               <select value={registerForm.gender} onChange={(event) => updateRegisterField("gender", event.target.value)}>
-                <option value="">No informado</option>
+                <option value="">Selecciona sexo</option>
                 <option value="Masculino">Masculino</option>
                 <option value="Femenino">Femenino</option>
-                <option value="Mixto">Mixto</option>
               </select>
+              <FieldError message={registerErrors.gender} />
             </label>
             <label className={registerErrors.categoryId ? "field-has-error" : ""}>Categoría
               <select required value={registerForm.categoryId} onChange={(event) => updateRegisterField("categoryId", event.target.value)}>
                 <option value="">Seleccioná una categoría</option>
                 {categories.map((category) => (
-                  <option key={category.id} value={category.id}>{category.name}</option>
+                  <option key={category.id} value={category.id}>{category.name} {category.branch}</option>
                 ))}
               </select>
               <FieldError message={registerErrors.categoryId} />

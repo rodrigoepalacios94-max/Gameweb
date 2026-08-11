@@ -3,6 +3,7 @@ import {
   createServiceClient,
   json,
   mercadoPagoFetch,
+  syncMercadoPagoOrder,
   syncMercadoPagoPayment,
   validateMercadoPagoSignature,
 } from "../_shared/mercadopago.ts";
@@ -25,6 +26,12 @@ function isPaymentNotification(req: Request, body: any) {
   return type === "payment";
 }
 
+function isOrderNotification(req: Request, body: any) {
+  const url = new URL(req.url);
+  const type = String(body?.type || body?.topic || url.searchParams.get("type") || url.searchParams.get("topic") || "").toLowerCase();
+  return type === "order" || type === "orders";
+}
+
 Deno.serve(async (req) => {
   const headers = corsHeaders(req);
   if (req.method === "OPTIONS") return new Response("ok", { headers });
@@ -35,6 +42,14 @@ Deno.serve(async (req) => {
     const providerPaymentId = paymentIdFromRequest(req, body);
     const validSignature = await validateMercadoPagoSignature(req, providerPaymentId || null);
     if (!validSignature) return json({ error: "INVALID_SIGNATURE" }, 401, headers);
+
+    if (isOrderNotification(req, body)) {
+      if (!providerPaymentId) return json({ error: "ORDER_ID_REQUIRED" }, 400, headers);
+      const serviceClient = createServiceClient();
+      const mercadoPagoOrder = await mercadoPagoFetch(`/v1/orders/${encodeURIComponent(providerPaymentId)}`);
+      const result = await syncMercadoPagoOrder(serviceClient, mercadoPagoOrder);
+      return json({ ok: true, ...result }, 200, headers);
+    }
 
     if (!isPaymentNotification(req, body)) {
       return json({ ok: true, ignored: true }, 200, headers);

@@ -26,7 +26,11 @@ function notificationBadgeLabel(count) {
 export function PlayerLayout() {
   const { canSwitchRole, signOut, user } = useAuth();
   const navigate = useNavigate();
-  const { data: notifications = [], reload: reloadNotifications } = useAsyncData(() => notificationService.getNotificationsByRole("player"), []);
+  const { data: notifications = [], reload: reloadNotifications } = useAsyncData(
+    () => notificationService.getNotificationsByRole("player"),
+    [],
+    { cacheKey: "player-layout-notifications" },
+  );
   const { sidebarCollapsed, toggleSidebar } = useSidebarPreference();
   const unreadCount = (notifications || []).filter((item) => !item.read).length;
   const unreadLabel = notificationBadgeLabel(unreadCount);
@@ -92,7 +96,7 @@ export function PlayerLayout() {
         </div>
       </header>
       <main className="shell-content">
-        <Outlet />
+        <Outlet context={{ playerNotifications: notifications || [], reloadPlayerNotifications: reloadNotifications }} />
       </main>
         <nav className="bottom-nav" aria-label="Navegación jugador">
         {playerNav.map((item) => (

@@ -171,13 +171,19 @@ function mapStage(row) {
   };
 }
 
+function normalizeDateInput(value, fallback = new Date()) {
+  const date = value instanceof Date ? value : new Date(value ?? fallback);
+  return Number.isNaN(date.getTime()) ? fallback : date;
+}
+
 function isEligibleRegistration(registration, now = new Date()) {
+  const nowDate = normalizeDateInput(now);
   if (!registration || registration.status === "cancelled") return false;
   if (["paid", "waived"].includes(registration.payment_status)) return true;
   if (registration.payment_status !== "pending") return false;
   if (!registration.payment_due_at) return true;
   const dueAt = new Date(registration.payment_due_at);
-  return !Number.isNaN(dueAt.getTime()) && dueAt.getTime() >= now.getTime();
+  return !Number.isNaN(dueAt.getTime()) && dueAt.getTime() >= nowDate.getTime();
 }
 
 function withTournamentLoadMeta(error, meta) {
@@ -234,6 +240,61 @@ function logAdminTournamentDetailError(error, meta = {}) {
     hint: error.hint || null,
     status: error.status || null,
   });
+}
+
+function logTournamentDeleteError(error, meta = {}) {
+  if (!import.meta.env.DEV || !error) return;
+  console.error("[GAME Admin] tournament delete error", {
+    table: meta.table || error.table || null,
+    select: meta.select || error.select || null,
+    filters: meta.filter || error.filter || null,
+    code: error.code || null,
+    message: error.message || null,
+    details: error.details || null,
+    hint: error.hint || null,
+    status: error.status || null,
+  });
+}
+
+function tournamentDeleteError(error, meta = {}) {
+  const loggedError = withTournamentLoadMeta(error, meta);
+  logSupabaseDataError("tournament delete", loggedError);
+  logTournamentDeleteError(loggedError, meta);
+  return createDataError("No pudimos eliminar el torneo. Intentá nuevamente.", { cause: loggedError });
+}
+
+async function selectDependencyIds(client, table, column, value, { select = "id", filter = `${column} eq ${value}` } = {}) {
+  const { data, error } = await client.from(table).select(select).eq(column, value);
+  if (error) throw tournamentDeleteError(error, { table, select, filter });
+  return (data || []).map((row) => row.id).filter(Boolean);
+}
+
+async function deleteByEq(client, table, column, value) {
+  const { error } = await client.from(table).delete().eq(column, value);
+  if (error) throw tournamentDeleteError(error, { table, filter: `${column} eq ${value}` });
+}
+
+async function deleteByIn(client, table, column, values = []) {
+  const ids = [...new Set(values.filter(Boolean))];
+  if (!ids.length) return;
+  const { error } = await client.from(table).delete().in(column, ids);
+  if (error) throw tournamentDeleteError(error, { table, filter: `${column} in (${ids.join(",")})` });
+}
+
+function dateValue(date) {
+  const value = Date.parse(`${date || ""}T12:00:00`);
+  return Number.isNaN(value) ? null : value;
+}
+
+function validateTournamentDates(payload = {}) {
+  const startDate = payload.startDate || payload.start_date;
+  const endDate = payload.endDate || payload.end_date || payload.finalsDate || payload.finals_date;
+  if (!startDate || !endDate) return;
+  const startValue = dateValue(startDate);
+  const endValue = dateValue(endDate);
+  if (startValue !== null && endValue !== null && endValue < startValue) {
+    throw createDataError("La fecha de finalizacion no puede ser anterior a la fecha de inicio del torneo.");
+  }
 }
 
 async function attachScoringSystems(rows = [], { optional = false } = {}) {
@@ -298,7 +359,7 @@ async function attachParticipantCounts(stages = [], { optional = false } = {}) {
     throw createDataError("No pudimos cargar las cantidades de participantes.", { cause: loggedError });
   }
   const counts = new Map(stageIds.map((id) => [id, new Set()]));
-  (data || []).filter(isEligibleRegistration).forEach((registration) => {
+  (data || []).filter((registration) => isEligibleRegistration(registration)).forEach((registration) => {
     (registration.registration_categories || []).forEach((item) => {
       if (!counts.has(item.tournament_category_id)) return;
       counts.get(item.tournament_category_id).add(registration.player_id);
@@ -441,8 +502,6 @@ export async function getAdminTournamentList() {
     .from("tournaments")
     .select(ADMIN_TOURNAMENT_LIST_SELECT)
     .order("created_at", { ascending: false });
-
-  console.log("ADMIN TOURNAMENTS RAW", { data, error });
 
   if (error) throw error;
   return (data || []).map(mapAdminTournamentListRow);
@@ -646,6 +705,7 @@ export const tournamentService = {
   },
   async createTournament(payload, actor = "admin-1") {
     const client = ensureSupabaseDataClient();
+    validateTournamentDates(payload);
     const { data, error } = await client.from("tournaments").insert(mapTournamentPayload(payload)).select(tournamentSelect).single();
     if (error) {
       const loggedError = withTournamentLoadMeta(error, {
@@ -713,6 +773,7 @@ export const tournamentService = {
   },
   async updateTournament(id, updates, actor = "admin-1") {
     const client = ensureSupabaseDataClient();
+    validateTournamentDates(updates);
     const { error } = await client.from("tournaments").update(mapTournamentUpdates(updates)).eq("id", id);
     if (error) {
       logSupabaseDataError("tournament update", error);
@@ -908,11 +969,32 @@ export const tournamentService = {
       throw createDataError("Solo se pueden eliminar torneos con inscripciones abiertas.");
     }
     const client = ensureSupabaseDataClient();
-    const { error } = await client.from("tournaments").delete().eq("id", id);
-    if (error) {
-      logSupabaseDataError("tournament delete", error);
-      throw createDataError("No pudimos eliminar el torneo.", { cause: error });
-    }
+    const tournamentCategoryIds = await selectDependencyIds(client, "tournament_categories", "tournament_id", id);
+    const registrationIds = await selectDependencyIds(client, "registrations", "tournament_id", id);
+    const matchIds = await selectDependencyIds(client, "matches", "tournament_id", id);
+    const zoneIds = await selectDependencyIds(client, "zones", "tournament_id", id);
+
+    await deleteByIn(client, "match_connections", "parent_match_id", matchIds);
+    await deleteByIn(client, "match_connections", "child_match_id", matchIds);
+    await deleteByIn(client, "match_sets", "match_id", matchIds);
+    await deleteByIn(client, "match_availability_responses", "match_id", matchIds);
+    await deleteByEq(client, "player_discipline_faults", "tournament_id", id);
+    await deleteByIn(client, "player_discipline_faults", "match_id", matchIds);
+    await deleteByEq(client, "discipline_claims", "tournament_id", id);
+    await deleteByEq(client, "player_tournament_expulsions", "tournament_id", id);
+    await deleteByEq(client, "ranking_award_batches", "tournament_id", id);
+    await deleteByEq(client, "preliminary_rankings", "tournament_id", id);
+    await deleteByEq(client, "matches", "tournament_id", id);
+    await deleteByIn(client, "zone_players", "zone_id", zoneIds);
+    await deleteByEq(client, "zones", "tournament_id", id);
+    await deleteByEq(client, "brackets", "tournament_id", id);
+    await deleteByEq(client, "payments", "tournament_id", id);
+    await deleteByIn(client, "registration_categories", "registration_id", registrationIds);
+    await deleteByIn(client, "registration_categories", "tournament_category_id", tournamentCategoryIds);
+    await deleteByEq(client, "registrations", "tournament_id", id);
+    await deleteByEq(client, "tournament_categories", "tournament_id", id);
+    await deleteByEq(client, "tournaments", "id", id);
+
     await auditService.record({
       action: "delete_open_tournament",
       entityType: "tournament",
@@ -940,6 +1022,7 @@ export const tournamentService = {
       description: pendingCount ? `Torneo finalizado con ${pendingCount} partidos pendientes.` : "Torneo finalizado sin partidos pendientes.",
       actor,
     });
+    emailService.processQueuedGameEmails("tournament_finished");
     return tournament;
   },
 };

@@ -302,6 +302,7 @@ async function updateScheduledMatches(assignments) {
       throw createDataError("No pudimos guardar la programacion automatica.", { cause: error });
     }
   }));
+  emailService.processQueuedGameEmails("match_programmed");
 }
 
 function isPlayableMatch(match) {

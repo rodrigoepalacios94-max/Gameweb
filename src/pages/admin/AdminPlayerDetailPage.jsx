@@ -1,5 +1,6 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Ban, Pencil, RotateCcw, ShieldAlert, Trash2 } from "lucide-react";
 import { Avatar } from "../../components/common/Avatar";
 import { Badge } from "../../components/common/Badge";
@@ -12,6 +13,7 @@ import { LoadingState } from "../../components/common/LoadingState";
 import { Modal } from "../../components/common/Modal";
 import { useAuth } from "../../context/AuthContext";
 import { useAsyncData } from "../../hooks/useAsyncData";
+import { categoryService } from "../../services/categoryService";
 import { categoryRequestService } from "../../services/categoryRequestService";
 import { disciplineService } from "../../services/disciplineService";
 import { enrollmentService } from "../../services/enrollmentService";
@@ -19,6 +21,7 @@ import { matchService } from "../../services/matchService";
 import { playerService } from "../../services/playerService";
 import { rankingService } from "../../services/rankingService";
 import { tournamentService } from "../../services/tournamentService";
+import { queryKeys } from "../../query/queryKeys";
 import { formatDate } from "../../utils/formatters";
 
 async function loadOptional(label, loader, fallback) {
@@ -35,9 +38,45 @@ async function loadOptional(label, loader, fallback) {
   }
 }
 
+function parseDeleteErrorPayload(error) {
+  const responseBody = error?.cause?.responseBody;
+  if (!responseBody) return null;
+  try {
+    return JSON.parse(responseBody);
+  } catch {
+    return null;
+  }
+}
+
+function getDeleteErrorCode(error) {
+  const payload = parseDeleteErrorPayload(error);
+  return payload?.error || error.code || error.cause?.code || null;
+}
+
+function getDeleteErrorMessage(error) {
+  const payload = parseDeleteErrorPayload(error);
+  return payload?.message || error.message || "NO PUDIMOS ELIMINAR EL JUGADOR";
+}
+
+function FieldError({ message }) {
+  return message ? <span className="field-error">{message}</span> : null;
+}
+
+function validateEditForm(form, activeCategories) {
+  if (!form.phone.trim()) return { field: "phone", message: "INGRESA EL TELEFONO" };
+  if (!/^\d+$/.test(form.phone.trim())) return { field: "phone", message: "EL TELEFONO SOLO PUEDE CONTENER NUMEROS" };
+  if (!form.birthDate) return { field: "birthDate", message: "INGRESA LA FECHA DE NACIMIENTO" };
+  if (!form.gender) return { field: "gender", message: "SELECCIONA EL SEXO" };
+  if (!["Masculino", "Femenino"].includes(form.gender)) return { field: "gender", message: "SELECCIONA MASCULINO O FEMENINO" };
+  if (!form.categoryId || !activeCategories.some((category) => category.id === form.categoryId)) return { field: "categoryId", message: "SELECCIONA UNA CATEGORIA ACTIVA" };
+  if (!form.status) return { field: "status", message: "SELECCIONA EL ESTADO" };
+  return null;
+}
+
 export function AdminPlayerDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { profile } = useAuth();
   const [confirmAction, setConfirmAction] = useState(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -48,18 +87,31 @@ export function AdminPlayerDetailPage() {
   const [pointsModalOpen, setPointsModalOpen] = useState(false);
   const [pointsForm, setPointsForm] = useState({ mode: "sumar", points: "", reason: "" });
   const [benefitForm, setBenefitForm] = useState({ percentage: "0", months: "1", indefinite: false });
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState(null);
+  const [editErrors, setEditErrors] = useState({});
+  const [editGeneralError, setEditGeneralError] = useState("");
   const { data, loading, error, reload } = useAsyncData(async () => {
-    const player = await playerService.getPlayerById(id);
-    if (!player) return { player: null, matches: [], tournaments: [], requests: [], faults: [], enrollments: [] };
-    const [matches, tournaments, requests, discipline, enrollments] = await Promise.all([
+    const player = await playerService.getPlayerById(id, { includeDiscipline: false });
+    if (!player) return { player: null, matches: [], tournaments: [], requests: [], faults: [], enrollments: [], categories: [] };
+    const [matches, tournaments, requests, discipline, enrollments, categories] = await Promise.all([
       loadOptional("player matches", () => matchService.getMatchesByPlayer(id), []),
       loadOptional("player tournaments", () => tournamentService.getTournaments(), []),
       loadOptional("player requests", () => categoryRequestService.getRequestsByPlayer(id), []),
       loadOptional("player discipline", () => disciplineService.getPlayerDiscipline(id), { faults: [] }),
       loadOptional("player enrollments", () => enrollmentService.getEnrollmentsByPlayer(id), []),
+      loadOptional("categories", () => categoryService.getCategories(), []),
     ]);
+    const playerWithDiscipline = {
+      ...player,
+      discipline: {
+        ...player.discipline,
+        faults: discipline.activeFaultCount ?? discipline.faults?.length ?? 0,
+        status: discipline.status || player.discipline.status,
+      },
+    };
     return {
-      player,
+      player: playerWithDiscipline,
       matches,
       tournaments: tournaments.filter((tournament) =>
         tournament.participants?.includes(id) ||
@@ -68,8 +120,9 @@ export function AdminPlayerDetailPage() {
       requests,
       faults: discipline.faults,
       enrollments,
+      categories,
     };
-  }, [id]);
+  }, [id], { cacheKey: `admin-player-detail:${id}` });
   const loadedPlayer = data?.player;
 
   useEffect(() => {
@@ -84,7 +137,7 @@ export function AdminPlayerDetailPage() {
   if (loading) return <LoadingState message="Cargando jugador..." />;
   if (error) return <ErrorState title="No pudimos cargar el jugador." onRetry={reload} />;
 
-  const { player, matches, tournaments, requests, faults } = data;
+  const { player, matches, tournaments, requests, faults, categories } = data;
 
   if (!player) {
     return <EmptyState title="Jugador no encontrado" description="No existe un jugador con ese identificador." />;
@@ -100,6 +153,54 @@ export function AdminPlayerDetailPage() {
     enrollment.participationStatus === "eliminated_faults" ||
     enrollment.eliminationReason === "three_faults"
   );
+  const activeCategories = (categories || []).filter((category) => category.status === "Activa");
+
+  function updateEditField(field, value) {
+    setEditForm((current) => ({ ...current, [field]: value }));
+    setEditErrors((current) => ({ ...current, [field]: "" }));
+    setEditGeneralError("");
+  }
+
+  function openEditPlayer() {
+    setEditForm({
+      phone: player.phone || "",
+      birthDate: player.birthDate || "",
+      gender: player.gender || "",
+      categoryId: player.categoryId || "",
+      status: player.status || "Activo",
+      address: player.address || "",
+    });
+    setEditErrors({});
+    setEditGeneralError("");
+    setEditOpen(true);
+  }
+
+  async function savePlayerDetails(event) {
+    event.preventDefault();
+    setEditErrors({});
+    setEditGeneralError("");
+    const validationError = validateEditForm(editForm, activeCategories);
+    if (validationError) {
+      setEditErrors({ [validationError.field]: validationError.message });
+      return;
+    }
+    try {
+      await playerService.updatePlayer(player.id, {
+        phone: editForm.phone,
+        birthDate: editForm.birthDate,
+        gender: editForm.gender,
+        categoryId: editForm.categoryId,
+        status: editForm.status,
+        address: editForm.address,
+        categoryChangeReason: "Edicion administrativa de jugador",
+      });
+      setEditOpen(false);
+      reload();
+    } catch (saveError) {
+      if (saveError.field) setEditErrors({ [saveError.field]: saveError.message });
+      else setEditGeneralError(saveError.message || "NO PUDIMOS ACTUALIZAR EL JUGADOR");
+    }
+  }
 
   async function blockPlayer() {
     await playerService.setPlayerStatus(player.id, "Bloqueado por faltas");
@@ -145,24 +246,29 @@ export function AdminPlayerDetailPage() {
     setDeleteBlocked(false);
     try {
       await playerService.deletePlayer(player.id);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.adminPlayers() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.adminDashboard() }),
+      ]);
       setDeleteModalOpen(false);
       navigate("/admin/players", {
         replace: true,
         state: { message: "JUGADOR ELIMINADO" },
       });
     } catch (error) {
-      if (error.code === "PLAYER_ACTIVE_TOURNAMENT") {
+      const deleteErrorCode = getDeleteErrorCode(error);
+      if (deleteErrorCode === "PLAYER_ACTIVE_TOURNAMENT") {
         setDeleteBlocked(true);
         setDeleteProtectionMessage("El jugador actualmente está activo en un torneo.");
         setDeleteError("");
-      } else if (error.code === "ADMIN_PLAYER_DELETE_FORBIDDEN") {
+      } else if (deleteErrorCode === "ADMIN_PLAYER_DELETE_FORBIDDEN") {
         setDeleteBlocked(true);
         setDeleteProtectionMessage("Esta ficha deportiva está vinculada a una cuenta administradora. Si deja de jugar, desvinculá o desactivá la ficha; no elimines la cuenta Admin.");
         setDeleteError("");
-      } else if (["PLAYER_HAS_SPORT_HISTORY", "PLAYER_HAS_SPORT_ACTIVITY"].includes(error.code)) {
+      } else if (["PLAYER_HAS_SPORT_HISTORY", "PLAYER_HAS_SPORT_ACTIVITY"].includes(deleteErrorCode)) {
         setDeleteError("NO SE PUEDE ELIMINAR EL JUGADOR PORQUE TIENE HISTORIAL DEPORTIVO REGISTRADO.");
       } else {
-        setDeleteError(error.message || "NO PUDIMOS ELIMINAR EL JUGADOR");
+        setDeleteError(getDeleteErrorMessage(error));
       }
     } finally {
       setDeletingPlayer(false);
@@ -205,6 +311,7 @@ export function AdminPlayerDetailPage() {
 
       <div className="player-detail-actions">
         <div className="card-actions">
+          <Button variant="outline-green" icon={Pencil} onClick={openEditPlayer}>Editar datos</Button>
           <Button variant="secondary" icon={Pencil} onClick={() => setPointsModalOpen(true)}>Modificar puntos</Button>
           {isBlocked ? (
             <Button variant="outline-green" icon={RotateCcw} onClick={() => setConfirmAction("unblock")}>Desbloquear jugador</Button>
@@ -371,6 +478,56 @@ export function AdminPlayerDetailPage() {
           )}
         </Card>
       </div>
+
+      <Modal open={editOpen} title="Editar datos del jugador" onClose={() => setEditOpen(false)} size="lg">
+        {editForm ? (
+          <form className="modal-form" onSubmit={savePlayerDetails} noValidate>
+            {editGeneralError ? <div className="form-alert">{editGeneralError}</div> : null}
+            <div className="form-grid">
+              <label className={editErrors.phone ? "field-has-error" : ""}>Telefono
+                <input inputMode="numeric" value={editForm.phone} onChange={(event) => updateEditField("phone", event.target.value.replace(/\D/g, ""))} />
+                <FieldError message={editErrors.phone} />
+              </label>
+              <label className={editErrors.birthDate ? "field-has-error" : ""}>Fecha de nacimiento
+                <input type="date" value={editForm.birthDate} onChange={(event) => updateEditField("birthDate", event.target.value)} />
+                <FieldError message={editErrors.birthDate} />
+              </label>
+              <label className={editErrors.gender ? "field-has-error" : ""}>Sexo
+                <select value={editForm.gender} onChange={(event) => updateEditField("gender", event.target.value)}>
+                  <option value="">Selecciona sexo</option>
+                  <option value="Masculino">Masculino</option>
+                  <option value="Femenino">Femenino</option>
+                </select>
+                <FieldError message={editErrors.gender} />
+              </label>
+              <label className={editErrors.categoryId ? "field-has-error" : ""}>Categoria actual
+                <select value={editForm.categoryId} onChange={(event) => updateEditField("categoryId", event.target.value)}>
+                  <option value="">Selecciona una categoria</option>
+                  {activeCategories.map((category) => (
+                    <option key={category.id} value={category.id}>{category.name} {category.branch}</option>
+                  ))}
+                </select>
+                <FieldError message={editErrors.categoryId} />
+              </label>
+              <label className={editErrors.status ? "field-has-error" : ""}>Estado
+                <select value={editForm.status} onChange={(event) => updateEditField("status", event.target.value)}>
+                  <option value="Activo">Activo</option>
+                  <option value="Suspendido">Suspendido</option>
+                  <option value="Bloqueado por faltas">Bloqueado por faltas</option>
+                </select>
+                <FieldError message={editErrors.status} />
+              </label>
+              <label>Domicilio
+                <input value={editForm.address} onChange={(event) => updateEditField("address", event.target.value)} />
+              </label>
+            </div>
+            <div className="wizard-actions">
+              <Button variant="ghost" type="button" onClick={() => setEditOpen(false)}>Cancelar</Button>
+              <Button type="submit">Guardar datos</Button>
+            </div>
+          </form>
+        ) : null}
+      </Modal>
 
       <Modal open={pointsModalOpen} title="Modificar puntos" onClose={() => setPointsModalOpen(false)}>
         <form className="modal-form" onSubmit={submitPoints}>

@@ -12,7 +12,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useOutletContext } from "react-router-dom";
 import { Avatar } from "../../components/common/Avatar";
 import { Badge } from "../../components/common/Badge";
 import { Button } from "../../components/common/Button";
@@ -23,75 +23,39 @@ import { Modal } from "../../components/common/Modal";
 import { StatCard } from "../../components/common/StatCard";
 import { TournamentRegistrationModal } from "../../components/tournaments/TournamentRegistrationModal";
 import { useAuth } from "../../context/AuthContext";
-import { useAsyncData } from "../../hooks/useAsyncData";
 import { availabilityService } from "../../services/availabilityService";
-import { categoryService } from "../../services/categoryService";
 import { enrollmentService } from "../../services/enrollmentService";
-import { matchService } from "../../services/matchService";
-import { notificationService } from "../../services/notificationService";
-import { playerService } from "../../services/playerService";
-import { tournamentService } from "../../services/tournamentService";
+import { usePlayerHomeQuery } from "../../query/pageQueries";
 import { formatCurrency, formatDate } from "../../utils/formatters";
-import { buildPlayerTournamentViews } from "../../utils/playerTournamentView";
 import { getVisibleTournamentDescription } from "../../utils/tournamentDescription";
-
-async function loadOptional(label, loader, fallback) {
-  try {
-    return await loader();
-  } catch (error) {
-    console.error(`[GAME Player] ${label}`, {
-      code: error.code || error.cause?.code || null,
-      message: error.message || error.cause?.message || null,
-      details: error.details || error.cause?.details || null,
-      hint: error.hint || error.cause?.hint || null,
-    });
-    return fallback;
-  }
-}
 
 export function PlayerHomePage() {
   const { user } = useAuth();
+  const { playerNotifications = [] } = useOutletContext() || {};
   const [selectedAvailableSlots, setSelectedAvailableSlots] = useState([]);
   const [attendanceModalOpen, setAttendanceModalOpen] = useState(false);
   const [registrationTournament, setRegistrationTournament] = useState(null);
   const [pendingPaymentAction, setPendingPaymentAction] = useState("");
   const [pendingPaymentError, setPendingPaymentError] = useState("");
-  const { data, loading, error, reload } = useAsyncData(async () => {
-    const currentPlayer = await loadOptional("current player", () => playerService.getCurrentPlayer(), user);
-    const [matches, tournaments, categories, enrollments, notifications, attendanceRequests, pendingPayments] = await Promise.all([
-      loadOptional("matches", () => matchService.getPlayerMatches(user.id), []),
-      loadOptional("visible tournaments", () => tournamentService.getVisibleTournamentsForPlayer(user.id), []),
-      loadOptional("categories", () => categoryService.getCategories(), []),
-      loadOptional("enrollments", () => enrollmentService.getEnrollmentsByPlayer(user.id), []),
-      loadOptional("notifications", () => notificationService.getNotificationsByRole("player"), []),
-      loadOptional("attendance requests", () => availabilityService.getPlayerAttendanceRequests(user.id), []),
-      loadOptional("pending payments", () => enrollmentService.getPendingPaymentsByPlayer(user.id), []),
-    ]);
-    return {
-      matches,
-      tournaments: buildPlayerTournamentViews({ tournaments, categories, currentPlayer, enrollments }),
-      currentPlayer,
-      enrollments,
-      pendingPayments,
-      notifications,
-      attendanceRequests,
-    };
-  }, [user.id]);
+  const { data, isLoading: loading, error, refetch: reload } = usePlayerHomeQuery(user);
 
   if (loading) return <LoadingState message="Cargando tu dashboard..." />;
   if (error) return <ErrorState title="No pudimos cargar el inicio del jugador." onRetry={reload} />;
 
+  const currentPlayer = data.currentPlayer || user;
+  const missingTournamentProfileData = !currentPlayer?.gender || !currentPlayer?.categoryId;
   const scheduledNextMatch = data.matches.find((match) => match.status !== "Finalizado");
-  const openTournaments = data.tournaments.filter(
-    (tournament) =>
-      tournament.status === "Inscripciones abiertas" &&
-      (tournament.eligibleCategories?.length > 0 || tournament.existingEnrollments?.length > 0),
-  );
+  const openTournaments = missingTournamentProfileData
+    ? []
+    : data.tournaments.filter(
+      (tournament) =>
+        tournament.status === "Inscripciones abiertas" &&
+        (tournament.eligibleCategories?.length > 0 || tournament.existingEnrollments?.length > 0),
+    );
   const latestResults = data.matches.filter((match) => match.status === "Finalizado");
-  const importantNotifications = data.notifications.filter((notification) => !notification.read).slice(0, 3);
+  const importantNotifications = playerNotifications.filter((notification) => !notification.read).slice(0, 3);
   const attendanceRequest = data.attendanceRequests.find((match) => match.needsAttendanceConfirmation) || data.attendanceRequests[0];
   const nextMatch = attendanceRequest || scheduledNextMatch;
-  const currentPlayer = data.currentPlayer || user;
 
   function toggleAvailableSlot(slot) {
     setSelectedAvailableSlots((current) => (current.includes(slot) ? current.filter((item) => item !== slot) : [...current, slot]));
@@ -160,6 +124,11 @@ export function PlayerHomePage() {
         <StatCard label="Puntos" value={user.points} description="Puntos acumulados" icon={Star} />
       </div>
 
+      {missingTournamentProfileData ? (
+        <div className="info-band info-band--warning">
+          <strong>Completá tu sexo y categoría actual para ver los torneos disponibles.</strong>
+        </div>
+      ) : null}
       {data.pendingPayments?.length ? (
         <section className="pending-payment-stack">
           {pendingPaymentError ? <div className="form-alert">{pendingPaymentError}</div> : null}

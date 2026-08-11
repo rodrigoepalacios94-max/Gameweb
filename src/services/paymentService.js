@@ -11,6 +11,7 @@ const paymentMessages = {
   MERCADOPAGO_ACCESS_TOKEN_MISSING: "No pudimos iniciar el pago. Intenta nuevamente.",
   MERCADOPAGO_API_ERROR: "No pudimos iniciar el pago. Intenta nuevamente.",
   MERCADOPAGO_CHECKOUT_URL_MISSING: "No pudimos iniciar el pago. Intenta nuevamente.",
+  MERCADOPAGO_QR_DATA_MISSING: "No pudimos generar el QR de Mercado Pago. Intenta nuevamente.",
 };
 
 async function readFunctionErrorBody(error) {
@@ -62,12 +63,12 @@ async function unwrapFunctionError(context, error, data, fallbackMessage) {
 }
 
 export const paymentService = {
-  async createMercadoPagoPreference(registrationId) {
+  async createMercadoPagoPreference(registrationId, paymentMethod = "checkout") {
     const client = ensureSupabaseDataClient();
     const headers = await getAuthHeaders(client);
     const { data, error } = await client.functions.invoke("mercadopago-create-preference", {
       headers,
-      body: { registrationId },
+      body: { registrationId, paymentMethod },
     });
     await unwrapFunctionError(
       "mercadopago create preference",
@@ -78,10 +79,12 @@ export const paymentService = {
     return data;
   },
 
-  async getMercadoPagoPaymentStatus({ registrationId, providerPaymentId }) {
+  async getMercadoPagoPaymentStatus({ registrationId, providerPaymentId, providerOrderId, orderId }) {
     const client = ensureSupabaseDataClient();
+    const headers = await getAuthHeaders(client);
     const { data, error } = await client.functions.invoke("mercadopago-payment-status", {
-      body: { registrationId, providerPaymentId },
+      headers,
+      body: { registrationId, providerPaymentId, providerOrderId: providerOrderId || orderId },
     });
     await unwrapFunctionError(
       "mercadopago payment status",

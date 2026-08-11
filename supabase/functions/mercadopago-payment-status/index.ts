@@ -6,6 +6,7 @@ import {
   getAuthenticatedProfile,
   json,
   mercadoPagoFetch,
+  syncMercadoPagoOrder,
   syncMercadoPagoPayment,
 } from "../_shared/mercadopago.ts";
 
@@ -51,10 +52,22 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const registrationId = String(body.registrationId || "").trim();
     const providerPaymentId = String(body.providerPaymentId || "").trim();
+    const providerOrderId = String(body.providerOrderId || body.orderId || "").trim();
     if (!registrationId) return json({ error: "REGISTRATION_REQUIRED" }, 400, headers);
 
     let registration = await fetchRegistration(serviceClient, registrationId);
     assertRegistrationAccess(registration, profile);
+
+    if (providerOrderId) {
+      const mercadoPagoOrder = await mercadoPagoFetch(`/v1/orders/${encodeURIComponent(providerOrderId)}`);
+      const externalReference = String(mercadoPagoOrder?.external_reference || "");
+      if (externalReference && externalReference !== registrationId) {
+        return json({ error: "ORDER_REGISTRATION_MISMATCH" }, 409, headers);
+      }
+      await syncMercadoPagoOrder(serviceClient, mercadoPagoOrder);
+      registration = await fetchRegistration(serviceClient, registrationId);
+      assertRegistrationAccess(registration, profile);
+    }
 
     if (providerPaymentId) {
       const mercadoPagoPayment = await mercadoPagoFetch(`/v1/payments/${encodeURIComponent(providerPaymentId)}`);

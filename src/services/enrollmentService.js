@@ -46,18 +46,25 @@ const registrationSelect = `
       id,
       category_id
     )
-  ),
-  payments (
-    id,
-    provider,
-    amount,
-    status,
-    payment_method,
-    approved_at,
-    review_required,
-    created_at
   )
 `;
+
+const paymentSelect = `
+  id,
+  registration_id,
+  provider,
+  amount,
+  status,
+  payment_method,
+  approved_at,
+  review_required,
+  created_at
+`;
+
+function normalizeDateInput(value, fallback = new Date()) {
+  const date = value instanceof Date ? value : new Date(value ?? fallback);
+  return Number.isNaN(date.getTime()) ? fallback : date;
+}
 
 function paymentStatusFromDb(value) {
   if (value === "paid") return PAYMENT_STATUS.PAID;
@@ -79,8 +86,43 @@ function playerName(player) {
   return `${player?.first_name || ""} ${player?.last_name || ""}`.trim();
 }
 
-function latestPayment(payments = []) {
-  return [...payments].sort((left, right) => new Date(right.created_at || 0) - new Date(left.created_at || 0))[0] || null;
+function normalizePayments(payments) {
+  if (Array.isArray(payments)) return payments;
+  return payments ? [payments] : [];
+}
+
+function latestPayment(payments) {
+  return normalizePayments(payments)
+    .sort((left, right) => new Date(right.created_at || 0) - new Date(left.created_at || 0))[0] || null;
+}
+
+function groupPaymentsByRegistration(payments = []) {
+  return payments.reduce((groups, payment) => {
+    if (!payment?.registration_id) return groups;
+    groups.set(payment.registration_id, [...(groups.get(payment.registration_id) || []), payment]);
+    return groups;
+  }, new Map());
+}
+
+async function fetchPaymentsForRegistrations(registrationIds = []) {
+  const ids = [...new Set(registrationIds.filter(Boolean))];
+  if (!ids.length) return new Map();
+  const client = ensureSupabaseDataClient();
+  const { data, error } = await client
+    .from("payments")
+    .select(paymentSelect)
+    .in("registration_id", ids)
+    .order("created_at", { ascending: false });
+  if (error) {
+    logSupabaseDataError("registration payments optional fetch", {
+      ...error,
+      table: "payments",
+      select: paymentSelect,
+      filter: JSON.stringify({ registrationIds: ids }),
+    });
+    return new Map();
+  }
+  return groupPaymentsByRegistration(data || []);
 }
 
 function mapRegistrationRows(registration) {
@@ -152,15 +194,28 @@ async function fetchRegistrations(filters = {}) {
   if (filters.registrationId) query = query.eq("id", filters.registrationId);
   const { data, error } = await query.order("created_at", { ascending: false });
   if (error) {
-    logSupabaseDataError("registrations fetch", {
+    const source = {
       ...error,
       table: "registrations",
       select: registrationSelect,
       filter: JSON.stringify(filters),
-    });
-    throw createDataError("No pudimos cargar inscripciones.", { cause: error });
+    };
+    logSupabaseDataError("registrations fetch", source);
+    const wrappedError = createDataError("No pudimos cargar inscripciones.", { cause: source });
+    wrappedError.table = source.table;
+    wrappedError.select = source.select;
+    wrappedError.filters = source.filter;
+    wrappedError.details = source.details || null;
+    wrappedError.hint = source.hint || null;
+    wrappedError.status = source.status || null;
+    throw wrappedError;
   }
-  return (data || []).flatMap(mapRegistrationRows);
+  const rows = data || [];
+  const paymentsByRegistration = await fetchPaymentsForRegistrations(rows.map((registration) => registration.id));
+  return rows.flatMap((registration) => mapRegistrationRows({
+    ...registration,
+    payments: paymentsByRegistration.get(registration.id) || [],
+  }));
 }
 
 function buildPendingPaymentSummaries(rows) {
@@ -238,19 +293,23 @@ async function createRegistration(payload, paymentMode, actor) {
   return rows;
 }
 
-async function startCheckoutForRegistration(registrationId, actor = "player") {
-  const checkout = await paymentService.createMercadoPagoPreference(registrationId);
+async function startCheckoutForRegistration(registrationId, actor = "player", paymentMethod = "checkout") {
+  const checkout = await paymentService.createMercadoPagoPreference(registrationId, paymentMethod);
   await auditService.record({
-    action: "start_mercadopago_checkout",
+    action: paymentMethod === "qr" ? "start_mercadopago_qr" : "start_mercadopago_checkout",
     entityType: "registration",
     entityId: registrationId,
-    description: checkout.status === "waived" ? "Inscripcion liberada de pago." : "Checkout Pro de Mercado Pago iniciado.",
+    description: checkout.status === "waived"
+      ? "Inscripcion liberada de pago."
+      : paymentMethod === "qr"
+        ? "QR dinamico de Mercado Pago generado."
+        : "Checkout Pro de Mercado Pago iniciado.",
     actor,
   });
   return checkout;
 }
 
-async function startCheckoutFromEnrollmentRows(enrollments, actor) {
+async function startCheckoutFromEnrollmentRows(enrollments, actor, paymentMethod = "checkout") {
   const registrationId = enrollments?.[0]?.registrationId;
   if (!registrationId) {
     throw createDataError("No pudimos identificar la inscripcion para iniciar el pago.", {
@@ -266,7 +325,7 @@ async function startCheckoutFromEnrollmentRows(enrollments, actor) {
       code: "REGISTRATION_ALREADY_PAID",
     });
   }
-  const checkout = await startCheckoutForRegistration(registrationId, actor);
+  const checkout = await startCheckoutForRegistration(registrationId, actor, paymentMethod);
   return { ...checkout, enrollments };
 }
 
@@ -281,6 +340,10 @@ export const enrollmentService = {
 
   async getPendingPaymentsByPlayer(playerId) {
     return buildPendingPaymentSummaries(await fetchRegistrations({ playerId }));
+  },
+
+  getPendingPaymentSummaries(enrollments = []) {
+    return buildPendingPaymentSummaries(enrollments);
   },
 
   async getPendingPaymentsByTournament(tournamentId) {
@@ -310,12 +373,25 @@ export const enrollmentService = {
     return startCheckoutFromEnrollmentRows(enrollments, actor);
   },
 
+  async startMercadoPagoQr(payload, actor = payload.playerId) {
+    const existingEnrollments = await getExistingValidRegistrationRows(payload);
+    if (existingEnrollments?.length) {
+      return startCheckoutFromEnrollmentRows(existingEnrollments, actor, "qr");
+    }
+    const enrollments = await createRegistration(payload, "mercadopago", actor);
+    return startCheckoutFromEnrollmentRows(enrollments, actor, "qr");
+  },
+
   async startMercadoPagoCheckoutForRegistration(registrationId, actor = "player") {
     return startCheckoutForRegistration(registrationId, actor);
   },
 
-  async getPaymentReturnStatus({ registrationId, providerPaymentId }) {
-    return paymentService.getMercadoPagoPaymentStatus({ registrationId, providerPaymentId });
+  async startMercadoPagoQrForRegistration(registrationId, actor = "player") {
+    return startCheckoutForRegistration(registrationId, actor, "qr");
+  },
+
+  async getPaymentReturnStatus({ registrationId, providerPaymentId, providerOrderId, orderId }) {
+    return paymentService.getMercadoPagoPaymentStatus({ registrationId, providerPaymentId, providerOrderId, orderId });
   },
 
   async confirmPayLaterRegistrations(payload, actor = payload.playerId) {
@@ -325,6 +401,11 @@ export const enrollmentService = {
   async payPendingRegistration(registrationId, actor = "player") {
     const enrollments = await fetchRegistrations({ registrationId });
     return startCheckoutFromEnrollmentRows(enrollments, actor);
+  },
+
+  async payPendingRegistrationWithQr(registrationId, actor = "player") {
+    const enrollments = await fetchRegistrations({ registrationId });
+    return startCheckoutFromEnrollmentRows(enrollments, actor, "qr");
   },
 
   async markRegistrationAsPaid(registrationId, { method = "manual", actor = "admin-1" } = {}) {
@@ -380,7 +461,7 @@ export const enrollmentService = {
 
   async expirePendingRegistrations(now = new Date(), actor = "system") {
     const client = ensureSupabaseDataClient();
-    const { data, error } = await client.rpc("cancel_overdue_registrations", { p_now: now.toISOString() });
+    const { data, error } = await client.rpc("cancel_overdue_registrations", { p_now: normalizeDateInput(now).toISOString() });
     if (error) {
       logSupabaseDataError("registration expire rpc", error);
       throw createDataError("No pudimos procesar vencimientos de pago.", { cause: error });

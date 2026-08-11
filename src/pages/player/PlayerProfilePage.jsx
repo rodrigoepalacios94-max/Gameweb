@@ -11,26 +11,24 @@ import { LoadingState } from "../../components/common/LoadingState";
 import { Modal } from "../../components/common/Modal";
 import { Select } from "../../components/common/Select";
 import { useAuth } from "../../context/AuthContext";
-import { useAsyncData } from "../../hooks/useAsyncData";
-import { categoryService } from "../../services/categoryService";
-import { enrollmentService } from "../../services/enrollmentService";
-import { matchService } from "../../services/matchService";
 import { playerService } from "../../services/playerService";
-import { regulationDocumentService } from "../../services/regulationDocumentService";
-import { tournamentService } from "../../services/tournamentService";
+import { usePlayerProfileQuery } from "../../query/pageQueries";
 
-async function loadOptional(label, loader, fallback) {
-  try {
-    return await loader();
-  } catch (error) {
-    console.error(`[GAME Player] ${label}`, {
-      code: error.code || error.cause?.code || null,
-      message: error.message || error.cause?.message || null,
-      details: error.details || error.cause?.details || null,
-      hint: error.hint || error.cause?.hint || null,
-    });
-    return fallback;
-  }
+function FieldError({ message }) {
+  return message ? <span className="field-error">{message}</span> : null;
+}
+
+function validateProfileForm(form) {
+  if (!form.firstName.trim()) return { field: "firstName", message: "INGRESA TU NOMBRE" };
+  if (!form.lastName.trim()) return { field: "lastName", message: "INGRESA TU APELLIDO" };
+  if (!form.dni.trim()) return { field: "dni", message: "INGRESA TU DOCUMENTO" };
+  if (!/^\d+$/.test(form.dni.trim())) return { field: "dni", message: "EL DOCUMENTO SOLO PUEDE CONTENER NUMEROS" };
+  if (!form.birthDate) return { field: "birthDate", message: "INGRESA TU FECHA DE NACIMIENTO" };
+  if (!form.phone.trim()) return { field: "phone", message: "INGRESA TU TELEFONO" };
+  if (!/^\d+$/.test(form.phone.trim())) return { field: "phone", message: "EL TELEFONO SOLO PUEDE CONTENER NUMEROS" };
+  if (!form.gender) return { field: "gender", message: "SELECCIONA TU SEXO" };
+  if (!["Masculino", "Femenino"].includes(form.gender)) return { field: "gender", message: "SELECCIONA MASCULINO O FEMENINO" };
+  return null;
 }
 
 export function PlayerProfilePage() {
@@ -43,28 +41,9 @@ export function PlayerProfilePage() {
   const [categoryError, setCategoryError] = useState("");
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [profileForm, setProfileForm] = useState(null);
-  const { data, loading, error, reload } = useAsyncData(async () => {
-    const player = await playerService.getCurrentPlayer();
-    if (!player) throw new Error("No pudimos cargar tu ficha de jugador.");
-    const [matches, tournaments, categoryRules, regulationDocuments, activeCategories, enrollments] = await Promise.all([
-      loadOptional("matches", () => matchService.getPlayerMatches(user.id), []),
-      loadOptional("tournaments", () => tournamentService.getTournaments(), []),
-      loadOptional("category rules", () => categoryService.getCategoryRulesForPlayer(user.id), { lowerCategories: [] }),
-      loadOptional("regulations", () => regulationDocumentService.getRegulationDocuments({ activeOnly: true }), []),
-      loadOptional("active categories", () => categoryService.getActiveCategories(), []),
-      loadOptional("enrollments", () => enrollmentService.getEnrollmentsByPlayer(user.id), []),
-    ]);
-    return {
-      player,
-      matches,
-      tournaments: tournaments.filter((tournament) => tournament.participants?.includes(user.id)),
-      lowerCategories: categoryRules.lowerCategories,
-      regulationDocuments,
-      activeCategories,
-      enrollments,
-      allTournaments: tournaments,
-    };
-  }, [user.id]);
+  const [profileErrors, setProfileErrors] = useState({});
+  const [profileGeneralError, setProfileGeneralError] = useState("");
+  const { data, isLoading: loading, error, refetch: reload } = usePlayerProfileQuery(user);
 
   useEffect(() => {
     if (data?.lowerCategories?.[0]) setDescentCategoryId(data.lowerCategories[0].id);
@@ -84,7 +63,11 @@ export function PlayerProfilePage() {
       phone: player.phone || "",
       email: player.email || "",
       dni: player.dni || "",
+      gender: player.gender || "",
+      address: player.address || "",
     });
+    setProfileErrors({});
+    setProfileGeneralError("");
     setEditOpen(true);
   }
 
@@ -117,10 +100,22 @@ export function PlayerProfilePage() {
 
   async function saveProfile(event) {
     event.preventDefault();
-    await playerService.updateOwnProfile(data.player.id, profileForm);
-    refreshSession?.();
-    setEditOpen(false);
-    reload();
+    setProfileErrors({});
+    setProfileGeneralError("");
+    const validationError = validateProfileForm(profileForm);
+    if (validationError) {
+      setProfileErrors({ [validationError.field]: validationError.message });
+      return;
+    }
+    try {
+      await playerService.updateOwnProfile(data.player.id, profileForm);
+      refreshSession?.();
+      setEditOpen(false);
+      reload();
+    } catch (profileError) {
+      if (profileError.field) setProfileErrors({ [profileError.field]: profileError.message });
+      else setProfileGeneralError(profileError.message || "No pudimos guardar el perfil.");
+    }
   }
 
   async function changeAvatar(event) {
@@ -265,13 +260,58 @@ export function PlayerProfilePage() {
 
       <Modal open={editOpen} title="Editar perfil" onClose={() => setEditOpen(false)} size="lg">
         {profileForm ? (
-          <form className="modal-form" onSubmit={saveProfile}>
+          <form className="modal-form" onSubmit={saveProfile} noValidate>
+            {profileGeneralError ? <div className="form-alert">{profileGeneralError}</div> : null}
             <div className="form-grid">
-              <label>Nombre<input required value={profileForm.firstName} onChange={(event) => setProfileForm((current) => ({ ...current, firstName: event.target.value }))} /></label>
-              <label>Apellido<input required value={profileForm.lastName} onChange={(event) => setProfileForm((current) => ({ ...current, lastName: event.target.value }))} /></label>
-              <label>DNI<input value={profileForm.dni} onChange={(event) => setProfileForm((current) => ({ ...current, dni: event.target.value }))} /></label>
-              <label>Fecha de nacimiento<input type="date" value={profileForm.birthDate} onChange={(event) => setProfileForm((current) => ({ ...current, birthDate: event.target.value }))} /></label>
-              <label>Teléfono<input value={profileForm.phone} onChange={(event) => setProfileForm((current) => ({ ...current, phone: event.target.value }))} /></label>
+              <label className={profileErrors.firstName ? "field-has-error" : ""}>Nombre
+                <input required value={profileForm.firstName} onChange={(event) => {
+                  setProfileForm((current) => ({ ...current, firstName: event.target.value }));
+                  setProfileErrors((current) => ({ ...current, firstName: "" }));
+                }} />
+                <FieldError message={profileErrors.firstName} />
+              </label>
+              <label className={profileErrors.lastName ? "field-has-error" : ""}>Apellido
+                <input required value={profileForm.lastName} onChange={(event) => {
+                  setProfileForm((current) => ({ ...current, lastName: event.target.value }));
+                  setProfileErrors((current) => ({ ...current, lastName: "" }));
+                }} />
+                <FieldError message={profileErrors.lastName} />
+              </label>
+              <label className={profileErrors.dni ? "field-has-error" : ""}>DNI
+                <input inputMode="numeric" value={profileForm.dni} onChange={(event) => {
+                  setProfileForm((current) => ({ ...current, dni: event.target.value.replace(/\D/g, "") }));
+                  setProfileErrors((current) => ({ ...current, dni: "" }));
+                }} />
+                <FieldError message={profileErrors.dni} />
+              </label>
+              <label className={profileErrors.birthDate ? "field-has-error" : ""}>Fecha de nacimiento
+                <input type="date" value={profileForm.birthDate} onChange={(event) => {
+                  setProfileForm((current) => ({ ...current, birthDate: event.target.value }));
+                  setProfileErrors((current) => ({ ...current, birthDate: "" }));
+                }} />
+                <FieldError message={profileErrors.birthDate} />
+              </label>
+              <label className={profileErrors.phone ? "field-has-error" : ""}>Teléfono
+                <input inputMode="numeric" value={profileForm.phone} onChange={(event) => {
+                  setProfileForm((current) => ({ ...current, phone: event.target.value.replace(/\D/g, "") }));
+                  setProfileErrors((current) => ({ ...current, phone: "" }));
+                }} />
+                <FieldError message={profileErrors.phone} />
+              </label>
+              <label className={profileErrors.gender ? "field-has-error" : ""}>Sexo
+                <select value={profileForm.gender} onChange={(event) => {
+                  setProfileForm((current) => ({ ...current, gender: event.target.value }));
+                  setProfileErrors((current) => ({ ...current, gender: "" }));
+                }}>
+                  <option value="">Selecciona sexo</option>
+                  <option value="Masculino">Masculino</option>
+                  <option value="Femenino">Femenino</option>
+                </select>
+                <FieldError message={profileErrors.gender} />
+              </label>
+              <label>Domicilio
+                <input value={profileForm.address} onChange={(event) => setProfileForm((current) => ({ ...current, address: event.target.value }))} />
+              </label>
               <label>Correo de acceso<input disabled type="email" value={profileForm.email} readOnly /></label>
             </div>
             <p className="muted">Categoría actual: {player.categoryName || "Sin categoría"}. La categoría no se edita desde el perfil. El correo de acceso se cambia desde un flujo de seguridad separado.</p>

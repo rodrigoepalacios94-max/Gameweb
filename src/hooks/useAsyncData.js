@@ -1,6 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
 
-export function useAsyncData(loader, deps = []) {
+const inFlightLoads = new Map();
+
+function runLoader(loader, cacheKey) {
+  if (!cacheKey) return loader();
+  if (inFlightLoads.has(cacheKey)) return inFlightLoads.get(cacheKey);
+  const request = Promise.resolve()
+    .then(loader)
+    .finally(() => {
+      if (inFlightLoads.get(cacheKey) === request) inFlightLoads.delete(cacheKey);
+    });
+  inFlightLoads.set(cacheKey, request);
+  return request;
+}
+
+export function useAsyncData(loader, deps = [], options = {}) {
+  const cacheKey = options.cacheKey;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -10,7 +25,7 @@ export function useAsyncData(loader, deps = []) {
     setLoading(true);
     setError(null);
     try {
-      const result = await loader();
+      const result = await runLoader(loader, cacheKey);
       if (active) setData(result);
       return result;
     } catch (caughtError) {
@@ -19,13 +34,13 @@ export function useAsyncData(loader, deps = []) {
     } finally {
       if (active) setLoading(false);
     }
-  }, deps);
+  }, [...deps, cacheKey]);
 
   useEffect(() => {
     let ignore = false;
     setLoading(true);
     setError(null);
-    loader()
+    runLoader(loader, cacheKey)
       .then((result) => {
         if (!ignore) setData(result);
       })
@@ -38,7 +53,7 @@ export function useAsyncData(loader, deps = []) {
     return () => {
       ignore = true;
     };
-  }, deps);
+  }, [...deps, cacheKey]);
 
   return { data, loading, error, reload, setData };
 }

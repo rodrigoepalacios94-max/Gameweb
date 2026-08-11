@@ -161,6 +161,10 @@ export function mercadoPagoAccessToken() {
   return token;
 }
 
+export function mercadoPagoExpectedAccountId() {
+  return String(Deno.env.get("MERCADOPAGO_ACCOUNT_USER_ID") || "").trim();
+}
+
 export async function mercadoPagoFetch(path: string, init: RequestInit = {}) {
   const response = await fetch(`https://api.mercadopago.com${path}`, {
     ...init,
@@ -170,21 +174,47 @@ export async function mercadoPagoFetch(path: string, init: RequestInit = {}) {
       ...(init.headers || {}),
     },
   });
-  const data = await response.json().catch(() => ({}));
+  const rawBody = await response.text();
+  const data = parseMercadoPagoResponseBody(rawBody);
   if (!response.ok) {
     const error = new Error("MERCADOPAGO_API_ERROR");
     (error as any).status = response.status;
+    (error as any).method = init.method || "GET";
+    (error as any).path = path;
     (error as any).data = data;
     throw error;
   }
   return data;
 }
 
+function parseMercadoPagoResponseBody(rawBody: string) {
+  if (!rawBody) return {};
+  try {
+    return JSON.parse(rawBody);
+  } catch {
+    return { raw_body: rawBody.slice(0, 2000) };
+  }
+}
+
+export function sanitizeMercadoPagoPayload(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => sanitizeMercadoPagoPayload(item));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, nestedValue]) => {
+      if (/authorization|access.?token|secret|password|credential/i.test(key)) {
+        return [key, "[REDACTED]"];
+      }
+      return [key, sanitizeMercadoPagoPayload(nestedValue)];
+    }),
+  );
+}
+
 export function mapMercadoPagoStatus(status: string) {
   if (status === "approved") return "approved";
   if (["pending", "in_process", "authorized", "in_mediation"].includes(status)) return "pending";
   if (status === "rejected") return "rejected";
-  if (status === "cancelled") return "cancelled";
+  if (status === "cancelled" || status === "canceled") return "cancelled";
+  if (status === "expired") return "expired";
   if (status === "refunded") return "refunded";
   if (status === "charged_back") return "charged_back";
   return status || "unknown";
@@ -200,6 +230,7 @@ export function safeMercadoPagoMetadata(payment: any) {
     currency_id: payment?.currency_id || null,
     external_reference: payment?.external_reference || null,
     preference_id: payment?.preference_id || payment?.order?.id || null,
+    collector_id: payment?.collector_id ? String(payment.collector_id) : null,
     payment_method_id: payment?.payment_method_id || null,
     payment_type_id: payment?.payment_type_id || null,
     date_approved: payment?.date_approved || null,
@@ -311,12 +342,18 @@ export async function syncMercadoPagoPayment(serviceClient: any, payment: any) {
   const metadata = safeMercadoPagoMetadata(payment);
   const reviewReasons = [];
   const isApproved = mappedStatus === "approved";
-  const amountMatches = amountToCents(payment?.transaction_amount) === amountToCents(registration.total_amount);
+  const expectedAmount = existingPayment?.amount ?? registration.total_amount;
+  const amountMatches = amountToCents(payment?.transaction_amount) === amountToCents(expectedAmount);
   const currencyMatches = String(payment?.currency_id || "").toUpperCase() === "ARS";
+  const expectedAccountId = mercadoPagoExpectedAccountId();
+  const providerAccountId = String(payment?.collector_id || payment?.merchant_account_id || "");
+  const accountMatches = expectedAccountId && providerAccountId && expectedAccountId === providerAccountId;
   const samePaymentAlreadyApplied = existingPayment?.provider_payment_id === providerPaymentId && existingPayment?.status === "approved";
 
   if (isApproved && !amountMatches) reviewReasons.push("AMOUNT_MISMATCH");
   if (isApproved && !currencyMatches) reviewReasons.push("CURRENCY_MISMATCH");
+  if (isApproved && !expectedAccountId) reviewReasons.push("ACCOUNT_NOT_CONFIGURED");
+  if (isApproved && expectedAccountId && !accountMatches) reviewReasons.push("ACCOUNT_MISMATCH");
   if (isApproved && registration.status === "cancelled") reviewReasons.push("REGISTRATION_CANCELLED");
   if (isApproved && ["paid", "waived"].includes(registration.payment_status) && !samePaymentAlreadyApplied) {
     reviewReasons.push("REGISTRATION_ALREADY_SETTLED");
@@ -381,6 +418,102 @@ export async function syncMercadoPagoPayment(serviceClient: any, payment: any) {
     paymentId: paymentRow.id,
     providerPaymentId,
     status: mappedStatus,
+    reviewRequired,
+    reviewReasons,
+  };
+}
+
+export async function syncMercadoPagoOrder(serviceClient: any, order: any) {
+  const externalReference = String(order?.external_reference || "");
+  if (!externalReference) throw new Error("ORDER_EXTERNAL_REFERENCE_MISSING");
+
+  const registration = await fetchRegistration(serviceClient, externalReference);
+  if (!registration) throw new Error("REGISTRATION_NOT_FOUND_FOR_ORDER");
+
+  const orderId = order?.id ? String(order.id) : null;
+  const paymentTransaction = order?.transactions?.payments?.[0] || order?.payments?.[0] || {};
+  const transactionAmount = Number(paymentTransaction?.amount || order?.total_amount || registration.total_amount || 0);
+  const rawStatus = String(order?.status || paymentTransaction?.status || "").toLowerCase();
+  const statusDetail = String(order?.status_detail || paymentTransaction?.status_detail || "").toLowerCase();
+  const statusForMapping = statusDetail === "expired" ? "expired" : rawStatus;
+  const mappedStatus = ["paid", "processed", "approved", "closed", "accredited"].includes(statusForMapping) ? "approved" : mapMercadoPagoStatus(statusForMapping);
+
+  const { data: existingPayment, error: paymentLookupError } = await serviceClient
+    .from("payments")
+    .select("*")
+    .eq("provider", "mercadopago")
+    .eq("registration_id", registration.id)
+    .eq("provider_preference_id", orderId)
+    .maybeSingle();
+  if (paymentLookupError) throw paymentLookupError;
+
+  const fallbackPayment = existingPayment || (await findMercadoPagoPaymentRow(serviceClient, { id: null }, registration.id));
+  const expectedAmount = fallbackPayment?.amount ?? registration.total_amount;
+  const isApproved = mappedStatus === "approved";
+  const currency = String(order?.currency || paymentTransaction?.currency || paymentTransaction?.currency_id || "").toUpperCase();
+  const currencyMatches = !currency || currency === "ARS";
+  const expectedAccountId = mercadoPagoExpectedAccountId();
+  const providerAccountId = String(order?.user_id || order?.collector_id || "");
+  const accountMatches = expectedAccountId && providerAccountId && expectedAccountId === providerAccountId;
+  const reviewReasons = [];
+  if (isApproved && amountToCents(transactionAmount) !== amountToCents(expectedAmount)) reviewReasons.push("AMOUNT_MISMATCH");
+  if (isApproved && !currencyMatches) reviewReasons.push("CURRENCY_MISMATCH");
+  if (isApproved && !expectedAccountId) reviewReasons.push("ACCOUNT_NOT_CONFIGURED");
+  if (isApproved && expectedAccountId && !accountMatches) reviewReasons.push("ACCOUNT_MISMATCH");
+  if (isApproved && registration.status === "cancelled") reviewReasons.push("REGISTRATION_CANCELLED");
+  if (isApproved && ["paid", "waived"].includes(registration.payment_status) && fallbackPayment?.status !== "approved") {
+    reviewReasons.push("REGISTRATION_ALREADY_SETTLED");
+  }
+  const reviewRequired = reviewReasons.length > 0;
+
+  const payload = {
+    registration_id: registration.id,
+    player_id: registration.player_id,
+    tournament_id: registration.tournament_id,
+    provider: "mercadopago",
+    provider_payment_id: paymentTransaction?.id ? String(paymentTransaction.id) : fallbackPayment?.provider_payment_id || null,
+    provider_preference_id: orderId || fallbackPayment?.provider_preference_id || null,
+    external_reference: externalReference,
+    amount: transactionAmount,
+    status: mappedStatus || "pending",
+    raw_status: rawStatus || statusDetail || null,
+    payment_method: fallbackPayment?.payment_method || "mercadopago_qr",
+    amount_breakdown: registration.amount_breakdown || {},
+    approved_at: isApproved ? new Date().toISOString() : null,
+    last_provider_update_at: new Date().toISOString(),
+    review_required: reviewRequired,
+    review_reason: reviewReasons.join(",") || null,
+    provider_metadata: {
+      ...(fallbackPayment?.provider_metadata || {}),
+      order,
+    },
+    updated_at: new Date().toISOString(),
+  };
+
+  let paymentRow = fallbackPayment;
+  if (paymentRow?.id) {
+    const { data, error } = await serviceClient.from("payments").update(payload).eq("id", paymentRow.id).select("*").single();
+    if (error) throw error;
+    paymentRow = data;
+  } else {
+    const { data, error } = await serviceClient.from("payments").insert(payload).select("*").single();
+    if (error) throw error;
+    paymentRow = data;
+  }
+
+  if (isApproved && !reviewRequired && registration.payment_status === "pending" && registration.status !== "cancelled") {
+    const { error } = await serviceClient
+      .from("registrations")
+      .update({ payment_status: "paid", updated_at: new Date().toISOString() })
+      .eq("id", registration.id);
+    if (error) throw error;
+  }
+
+  return {
+    registrationId: registration.id,
+    paymentId: paymentRow.id,
+    providerOrderId: orderId,
+    status: mappedStatus || "pending",
     reviewRequired,
     reviewReasons,
   };

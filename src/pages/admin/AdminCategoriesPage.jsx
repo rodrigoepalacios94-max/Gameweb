@@ -37,7 +37,7 @@ export function AdminCategoriesPage() {
   if (error) return <ErrorState title="NO PUDIMOS CARGAR LAS CATEGORÍAS" description="Reintentá en unos segundos." onRetry={reload} />;
 
   const { categories, players } = data;
-  const branches = [...new Set(["Masculino", "Femenino", "Mixto", ...categories.map((category) => category.branch)])];
+  const branches = [...new Set(["Masculino", "Femenino", ...categories.map((category) => category.branch).filter(Boolean)])];
 
   function openForm(category = null) {
     setFormError("");
@@ -135,7 +135,6 @@ export function AdminCategoriesPage() {
                 <select value={form.branch} onChange={(event) => setForm((current) => ({ ...current, branch: event.target.value }))}>
                   <option value="Masculino">Masculino</option>
                   <option value="Femenino">Femenino</option>
-                  <option value="Mixto">Mixto</option>
                 </select>
               </label>
               <label>Nivel jerárquico<input type="number" required min="1" value={form.level} onChange={(event) => setForm((current) => ({ ...current, level: event.target.value }))} /></label>

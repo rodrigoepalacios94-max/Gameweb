@@ -1,5 +1,6 @@
 import { DEFAULT_MATCH_FORMAT, formatResultSets, getSetsToWin, isDecidingSuperTiebreak, normalizeMatchFormat } from "../utils/matchFormat";
 import { auditService } from "./auditService";
+import { emailService } from "./emailService";
 import { createDataError, ensureSupabaseDataClient, logSupabaseDataError } from "./supabaseDataUtils";
 
 const matchSelect = `
@@ -414,6 +415,7 @@ export const matchService = {
       description: "Partido reprogramado.",
       actor,
     });
+    emailService.processQueuedGameEmails("match_rescheduled");
     return fetchMatchById(id);
   },
 

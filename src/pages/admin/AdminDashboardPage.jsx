@@ -5,12 +5,11 @@ import { Card } from "../../components/common/Card";
 import { ErrorState } from "../../components/common/ErrorState";
 import { LoadingState } from "../../components/common/LoadingState";
 import { StatCard } from "../../components/common/StatCard";
-import { useAsyncData } from "../../hooks/useAsyncData";
-import { adminService } from "../../services/adminService";
+import { useAdminDashboardQuery } from "../../query/pageQueries";
 import { formatDate } from "../../utils/formatters";
 
 export function AdminDashboardPage() {
-  const { data, loading, error, reload } = useAsyncData(() => adminService.getDashboardSummary(), []);
+  const { data, isLoading: loading, error, refetch: reload } = useAdminDashboardQuery();
 
   if (loading) return <LoadingState message="Cargando dashboard admin..." />;
   if (error) return <ErrorState title="No pudimos cargar el dashboard admin." onRetry={reload} />;

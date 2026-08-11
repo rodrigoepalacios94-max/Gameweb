@@ -125,13 +125,19 @@ function mapDbPlayer(row, rankingMap, fallbackRanking) {
   };
 }
 
+function normalizeDateInput(value, fallback = new Date()) {
+  const date = value instanceof Date ? value : new Date(value ?? fallback);
+  return Number.isNaN(date.getTime()) ? fallback : date;
+}
+
 function isEligibleRegistration(registration, now = new Date()) {
+  const nowDate = normalizeDateInput(now);
   if (!registration || registration.status === "cancelled") return false;
   if (["paid", "waived"].includes(registration.payment_status)) return true;
   if (registration.payment_status !== "pending") return false;
   if (!registration.payment_due_at) return true;
   const dueAt = new Date(registration.payment_due_at);
-  return !Number.isNaN(dueAt.getTime()) && dueAt.getTime() >= now.getTime();
+  return !Number.isNaN(dueAt.getTime()) && dueAt.getTime() >= nowDate.getTime();
 }
 
 async function fetchTournamentCategoryParticipantRows(tournamentCategoryId) {
@@ -165,7 +171,7 @@ async function fetchTournamentCategoryParticipantRows(tournamentCategoryId) {
     });
     throw createDataError("No pudimos cargar los inscriptos de la categoria.", { cause: error });
   }
-  return (data || []).filter(isEligibleRegistration);
+  return (data || []).filter((registration) => isEligibleRegistration(registration));
 }
 
 export async function getTournamentCategoryParticipants(tournamentCategoryId, { categoryId = null, withRanking = true } = {}) {

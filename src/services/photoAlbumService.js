@@ -1,4 +1,5 @@
 import { createDataError, ensureSupabaseDataClient, logSupabaseDataError } from "./supabaseDataUtils";
+import { emailService } from "./emailService";
 
 const albumSelect = "id, title, url, is_active, created_at, updated_at";
 
@@ -68,6 +69,7 @@ export const photoAlbumService = {
       logSupabaseDataError("photo album create", error);
       throw createDataError("No pudimos crear el album.", { cause: error });
     }
+    if (data?.is_active) emailService.processQueuedGameEmails("photo_album_published");
     return mapAlbum(data);
   },
 
@@ -81,6 +83,7 @@ export const photoAlbumService = {
       logSupabaseDataError("photo album update", error);
       throw createDataError("No pudimos actualizar el album.", { cause: error });
     }
+    if (data?.is_active) emailService.processQueuedGameEmails("photo_album_published");
     return mapAlbum(data);
   },
 

@@ -61,10 +61,6 @@ function addDaysToDateString(date, days) {
   return toDateInputValue(parsed);
 }
 
-function isSunday(date) {
-  const parsed = parseLocalDate(date);
-  return Boolean(parsed && !Number.isNaN(parsed.getTime()) && parsed.getDay() === 0);
-}
 
 const timeOptions = Array.from({ length: 14 }, (_, hourIndex) => hourIndex + 9).flatMap((hour) =>
   [0, 15, 30, 45]
@@ -202,13 +198,13 @@ export function AdminTournamentCreatePage() {
       setActiveStep("general");
       return;
     }
-    if (!form.endDate || !isSunday(form.endDate)) {
-      setFormError("La fecha de finalización/final debe ser domingo.");
+    if (!form.endDate) {
+      setFormError("Completa la fecha de finalizacion del torneo.");
       setActiveStep("general");
       return;
     }
     if (parseLocalDate(form.startDate) > parseLocalDate(form.endDate)) {
-      setFormError("La fecha de inicio no puede ser posterior a la final.");
+      setFormError("La fecha de finalizacion no puede ser anterior a la fecha de inicio del torneo.");
       setActiveStep("general");
       return;
     }
@@ -330,9 +326,9 @@ export function AdminTournamentCreatePage() {
 
       <Card className="form-card">
         {activeStep === "general" ? (
-          <div className="form-grid">
+          <div className="form-grid tournament-general-grid">
             <label>Nombre<input value={form.name} onChange={(event) => updateField("name", event.target.value)} placeholder="Copa Invierno" /></label>
-            <label>Descripcion<textarea value={form.description} onChange={(event) => updateField("description", event.target.value)} placeholder="Descripcion opcional del torneo" /></label>
+            <label>Descripcion<textarea className="tournament-description-input" value={form.description} onChange={(event) => updateField("description", event.target.value)} placeholder="Descripcion opcional del torneo" /></label>
             <label>Fecha de inicio<input type="date" value={form.startDate} onChange={(event) => updateField("startDate", event.target.value)} /></label>
             <label>Fecha de finalizacion del torneo / Final<input type="date" value={form.endDate} onChange={(event) => updateField("endDate", event.target.value)} /></label>
             <label>Valor de inscripcion<input type="number" value={form.price} onChange={(event) => updateField("price", event.target.value)} /></label>
