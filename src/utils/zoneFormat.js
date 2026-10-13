@@ -14,11 +14,44 @@ const DIRECT_ROUND_BY_TARGET = {
   32: "16avos",
 };
 
+function gcd(a, b) {
+  let x = Math.abs(Number(a || 0));
+  let y = Math.abs(Number(b || 0));
+  while (y) {
+    const next = x % y;
+    x = y;
+    y = next;
+  }
+  return x || 1;
+}
+
+function gamePercentageKey(standing = {}) {
+  const gamesWon = Number(standing.gamesWon ?? 0);
+  const totalGames = gamesWon + Number(standing.gamesLost ?? 0);
+  if (totalGames <= 0) return "0/0";
+  const divisor = gcd(gamesWon, totalGames);
+  return `${gamesWon / divisor}/${totalGames / divisor}`;
+}
+
+function compareGamePercentage(a = {}, b = {}) {
+  const aGamesWon = Number(a.gamesWon ?? 0);
+  const aTotal = aGamesWon + Number(a.gamesLost ?? 0);
+  const bGamesWon = Number(b.gamesWon ?? 0);
+  const bTotal = bGamesWon + Number(b.gamesLost ?? 0);
+  if (aTotal <= 0 && bTotal <= 0) return 0;
+  if (aTotal <= 0) return -1;
+  if (bTotal <= 0) return 1;
+  return (aGamesWon * bTotal) - (bGamesWon * aTotal);
+}
+
 export function proposeZoneDistribution(participantCount = 0) {
   const count = Number(participantCount || 0);
   if (count <= 0) return [];
   if (count < 3) return [count];
   if (count <= 4) return [count];
+  if (count === 5) return [3, 2];
+  if (count === 6) return [3, 3];
+  if (count === 7) return [4, 3];
 
   const remainder = count % 3;
   if (remainder === 0) return Array.from({ length: count / 3 }, () => 3);
@@ -29,15 +62,17 @@ export function proposeZoneDistribution(participantCount = 0) {
 export function getZoneBracketValidation(totalQualifiers = 0) {
   const total = Number(totalQualifiers || 0);
   const target = getZoneTargetDrawSize(total);
-  const missing = Math.max(8 - total, 0);
+  const minimum = target;
+  const missing = Math.max(minimum - total, 0);
   const accessMatches = total > target ? total - target : 0;
   const accessPlayers = accessMatches * 2;
-  const directPlayers = total >= 8 ? Math.max(target - accessMatches, 0) : 0;
+  const directPlayers = total >= minimum ? Math.max(target - accessMatches, 0) : 0;
 
   return {
-    valid: total >= 8 && total <= 48 && directPlayers + accessMatches === target,
+    valid: total >= minimum && total <= 48 && directPlayers + accessMatches === target,
     total,
     target,
+    minimum,
     missing,
     excess: 0,
     directPlayers,
@@ -45,7 +80,7 @@ export function getZoneBracketValidation(totalQualifiers = 0) {
     accessMatches,
     accessRoundName: accessMatches ? ACCESS_ROUND_BY_TARGET[target] : null,
     directRoundName: DIRECT_ROUND_BY_TARGET[target],
-    ready: total >= 8 && total <= 48,
+    ready: total >= minimum && total <= 48,
   };
 }
 
@@ -63,7 +98,7 @@ export function isValidZoneQualifierCount(value) {
 export function getZoneValidationMessage(validation) {
   if (!validation) return "Selecciona cuantos jugadores clasifican por zona.";
   if (!validation.valid && validation.missing) {
-    return `NO SE PUEDE GENERAR LA LLAVE. ${validation.total} jugadores clasificados. Se necesita un minimo de 8. Falta clasificar ${validation.missing} jugador${validation.missing === 1 ? "" : "es"}.`;
+    return `Hay ${validation.total} jugadores clasificados y la llave necesita ${validation.minimum || validation.target || 8}. Falta clasificar ${validation.missing} jugador${validation.missing === 1 ? "" : "es"}.`;
   }
   if (!validation.valid) return `${validation.total} clasificados: cantidad inconsistente para el formato Zonas.`;
   if (!validation.accessMatches) return `${validation.total} clasificados. Llave objetivo: ${validation.target}. Todos comienzan directo en ${validation.directRoundName}. LISTO PARA GENERAR.`;
@@ -72,10 +107,10 @@ export function getZoneValidationMessage(validation) {
 
 export function getZoneTargetDrawSize(totalQualifiers = 0) {
   const total = Number(totalQualifiers || 0);
-  if (total >= 33) return 32;
-  if (total >= 32) return 32;
-  if (total >= 17) return 16;
-  if (total >= 16) return 16;
+  if (total <= 4) return 4;
+  if (total <= 15) return 8;
+  if (total <= 31) return 16;
+  if (total <= 48) return 32;
   return 8;
 }
 
@@ -83,6 +118,7 @@ export function getZoneMainRoundNames(drawSize) {
   if (drawSize === 32) return ["16avos", "8vos", "Cuartos", "Semifinal", "Final"];
   if (drawSize === 16) return ["8vos", "Cuartos", "Semifinal", "Final"];
   if (drawSize === 8) return ["Cuartos", "Semifinal", "Final"];
+  if (drawSize === 4) return ["Semifinal", "Final"];
   return ["Final"];
 }
 
@@ -99,18 +135,15 @@ export function getZoneMatchups(players = []) {
 function getStandingScore(standing) {
   return [
     Number(standing.zonePoints ?? standing.points ?? standing.wins ?? 0),
-    Number(standing.setsDiff ?? standing.setDifference ?? 0),
-    Number(standing.gamesDiff ?? standing.gameDifference ?? 0),
-    Number(standing.gamesWon ?? 0),
+    Number(standing.setsWon ?? 0),
+    gamePercentageKey(standing),
   ].join("|");
 }
 
-function compareStandingPerformance(playerA, playerB) {
+export function compareZonePerformance(playerA, playerB) {
   const fields = [
     ["zonePoints", "points", "wins"],
-    ["setsDiff", "setDifference"],
-    ["gamesDiff", "gameDifference"],
-    ["gamesWon"],
+    ["setsWon"],
   ];
 
   for (const aliases of fields) {
@@ -119,7 +152,14 @@ function compareStandingPerformance(playerA, playerB) {
     if (Number(b) !== Number(a)) return Number(b) - Number(a);
   }
 
+  const gamesPercentage = compareGamePercentage(playerA, playerB);
+  if (gamesPercentage) return -gamesPercentage;
+
   return 0;
+}
+
+function compareStandingPerformance(playerA, playerB) {
+  return compareZonePerformance(playerA, playerB);
 }
 
 function compareRanking(playerA, playerB) {
@@ -133,17 +173,13 @@ function safeRate(value, total) {
 }
 
 function getZoneSportMetrics(player) {
-  const played = Number(player.played ?? player.matchesPlayed ?? 0);
-  const setsWon = Number(player.setsWon ?? 0);
-  const setsLost = Number(player.setsLost ?? 0);
-  const gamesWon = Number(player.gamesWon ?? 0);
-  const gamesLost = Number(player.gamesLost ?? 0);
   return {
     zonePosition: Number(player.zonePosition ?? player.position ?? 9999),
     zoneSize: Number(player.zoneSize ?? player.size ?? 0),
-    winRate: safeRate(player.wins, played),
-    setRate: safeRate(setsWon, setsWon + setsLost),
-    gameRate: safeRate(gamesWon, gamesWon + gamesLost),
+    wins: Number(player.wins ?? player.zonePoints ?? player.points ?? 0),
+    setsWon: Number(player.setsWon ?? 0),
+    gamesWon: Number(player.gamesWon ?? 0),
+    gamesLost: Number(player.gamesLost ?? 0),
     ranking: Number(player.ranking ?? player.generalRanking ?? 9999),
     label: player.fullName || player.playerName || player.name || player.player || player.id || "",
   };
@@ -154,9 +190,9 @@ export function compareZoneSportOrder(playerA, playerB) {
   const b = getZoneSportMetrics(playerB);
   return a.zonePosition - b.zonePosition
     || b.zoneSize - a.zoneSize
-    || b.winRate - a.winRate
-    || b.setRate - a.setRate
-    || b.gameRate - a.gameRate
+    || b.wins - a.wins
+    || b.setsWon - a.setsWon
+    || -compareGamePercentage(a, b)
     || a.ranking - b.ranking
     || a.label.localeCompare(b.label, undefined, { numeric: true });
 }
@@ -230,6 +266,64 @@ export function pairZoneAccessPlayers(accessPlayers = []) {
 
 export function buildZoneAccessPreview(totalQualifiers = 0) {
   return getZoneBracketValidation(totalQualifiers);
+}
+
+export function getZoneCompletionOptions(zones = [], validation = null) {
+  const currentValidation = validation || getZoneBracketValidation(
+    zones.reduce((total, zone) => total + Number(zone.qualifiers || 0), 0)
+  );
+  const target = currentValidation.target || currentValidation.minimum || 8;
+  const zoneCount = zones.length;
+  const totalPlayers = zones.reduce((total, zone) => total + Number(zone.size || zone.playerIds?.length || zone.players?.length || zone.standings?.length || 0), 0);
+  const currentTotal = Number(currentValidation.total || 0);
+  const baseZoneWinners = Math.min(zoneCount, totalPlayers);
+  const missingBestNext = Math.max(0, target - baseZoneWinners);
+  const nextAvailable = Math.max(0, totalPlayers - baseZoneWinners);
+  const expandedTotal = zones.reduce((total, zone) => {
+    const size = Number(zone.size || zone.playerIds?.length || zone.players?.length || zone.standings?.length || 0);
+    return total + Math.min(ZONE_MAX_QUALIFIERS_PER_ZONE, size);
+  }, 0);
+  const expandedAccessMatches = Math.max(0, expandedTotal - target);
+  const expandedAccessPlayers = expandedAccessMatches * 2;
+  const expandedDirectPlayers = expandedTotal >= target ? Math.max(0, target - expandedAccessMatches) : 0;
+
+  const options = [];
+  if (baseZoneWinners > 0 && baseZoneWinners <= target) {
+    options.push({
+      id: "best-next",
+      title: "Completar con los mejores siguientes",
+      description: `Clasifican los ${baseZoneWinners} primeros de zona y se agregan los ${missingBestNext} mejor${missingBestNext === 1 ? "" : "es"} siguiente${missingBestNext === 1 ? "" : "s"}.`,
+      available: nextAvailable >= missingBestNext,
+      currentQualifiers: baseZoneWinners,
+      addedPlayers: Math.min(missingBestNext, nextAvailable),
+      target,
+      finalDrawPlayers: Math.min(target, baseZoneWinners + nextAvailable),
+      directPlayers: target,
+      accessPlayers: 0,
+      accessMatches: 0,
+      preview: `${baseZoneWinners} primeros de zona + ${missingBestNext} mejores siguientes = ${DIRECT_ROUND_BY_TARGET[target] || "llave"} de ${target}`,
+    });
+  }
+
+  options.push({
+    id: "expand-zone-qualifiers",
+    title: "Ampliar clasificados por zona",
+    description: "Clasificar mas jugadores por zona y, si sobran participantes, disputar una ronda de acceso.",
+    available: expandedTotal >= target && expandedAccessPlayers <= expandedTotal,
+    currentQualifiers: currentTotal,
+    expandedQualifiers: expandedTotal,
+    target,
+    finalDrawPlayers: target,
+    directPlayers: expandedDirectPlayers,
+    accessPlayers: expandedAccessPlayers,
+    accessMatches: expandedAccessMatches,
+    accessRoundName: expandedAccessMatches ? ACCESS_ROUND_BY_TARGET[target] : null,
+    preview: expandedAccessMatches
+      ? `${expandedTotal} clasificados ampliados: ${expandedDirectPlayers} directos + ${expandedAccessPlayers} juegan ${expandedAccessMatches} partidos de acceso = ${DIRECT_ROUND_BY_TARGET[target] || "llave"} de ${target}`
+      : `${expandedTotal} clasificados ampliados = ${DIRECT_ROUND_BY_TARGET[target] || "llave"} de ${target}`,
+  });
+
+  return options.filter((option) => option.available);
 }
 
 export function resolveZoneQualifiers(standings = [], qualifierCount = 1) {

@@ -50,7 +50,7 @@ function getMatchSide(match, index, count) {
 function splitMatches(round) {
   const matches = round?.matches || [];
   return matches.reduce((groups, match, index) => {
-    groups[getMatchSide(match, index, matches.length)].push(match);
+    groups[getMatchSide(match, index, matches.length)].push({ ...match, __sourceIndex: index });
     return groups;
   }, { left: [], right: [] });
 }
@@ -150,6 +150,7 @@ function buildExplicitConnections(columns) {
     column.positions.map((position) => {
       const target = positionsByMatchId.get(position.match.childMatchId);
       if (!target) return null;
+      if (!isBracketConnectionRenderable(column, target.column)) return null;
       const movesRight = column.index < target.column.index;
       return {
         id: `explicit-${position.match.matchId}-${position.match.childMatchId}`,
@@ -159,6 +160,63 @@ function buildExplicitConnections(columns) {
       };
     }).filter(Boolean),
   );
+}
+
+function isBracketConnectionRenderable(sourceColumn, targetColumn) {
+  if (!sourceColumn || !targetColumn) return false;
+  if (targetColumn.key === "final") return true;
+  if (sourceColumn.side && targetColumn.side && sourceColumn.side !== targetColumn.side) return false;
+  return sourceColumn.index !== targetColumn.index;
+}
+
+function parseWinnerReference(value) {
+  const match = String(value || "").trim().match(/^Ganador\s+(.+?)\s+(\d+)$/i);
+  if (!match) return null;
+  return {
+    roundName: normalize(match[1]),
+    matchIndex: Number(match[2]) - 1,
+  };
+}
+
+function buildLabelConnections(columns) {
+  const positionsByRoundAndIndex = new Map();
+  columns.forEach((column) => {
+    const roundName = normalize(column.round?.name || column.label || column.key);
+    column.positions.forEach((position) => {
+      const sourceIndex = Number.isFinite(position.match.__sourceIndex)
+        ? position.match.__sourceIndex
+        : column.positions.indexOf(position);
+      positionsByRoundAndIndex.set(`${roundName}:${sourceIndex}`, { column, position });
+    });
+  });
+
+  const connections = [];
+  const seen = new Set();
+  columns.forEach((targetColumn) => {
+    targetColumn.positions.forEach((targetPosition) => {
+      [
+        { slot: 1, label: targetPosition.match.playerA },
+        { slot: 2, label: targetPosition.match.playerB },
+      ].forEach(({ slot, label }) => {
+        const reference = parseWinnerReference(label);
+        if (!reference) return;
+        const source = positionsByRoundAndIndex.get(`${reference.roundName}:${reference.matchIndex}`);
+        if (!source || source.position === targetPosition) return;
+        if (!isBracketConnectionRenderable(source.column, targetColumn)) return;
+        const key = `${source.column.key}:${reference.matchIndex}->${targetColumn.key}:${targetPosition.match.matchId || targetPosition.match.id}:${slot}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const movesRight = source.column.index < targetColumn.index;
+        connections.push({
+          id: `label-${key}`,
+          from: getColumnPoint(source.column, source.position, movesRight ? "right" : "left"),
+          to: getColumnPoint(targetColumn, targetPosition, movesRight ? "left" : "right"),
+          active: Boolean(source.position.match.winner),
+        });
+      });
+    });
+  });
+  return connections;
 }
 
 function getPositionCenter(position) {
@@ -288,13 +346,10 @@ export function TournamentBracket({ bracket, detailBasePath = "/admin/matches", 
     const finalColumn = visualColumns.find((column) => column.key === "final");
     const rightVisual = visualColumns.filter((column) => column.side === "right");
     const explicitConnections = buildExplicitConnections(visualColumns);
+    const labelConnections = buildLabelConnections(visualColumns);
     const connections = explicitConnections.length
       ? explicitConnections
-      : [
-          ...buildSideConnections(leftVisual, "left"),
-          ...buildSideConnections(rightVisual, "right"),
-          ...(finalColumn ? buildFinalConnections(leftVisual, finalColumn, rightVisual) : []),
-        ];
+      : labelConnections;
     const finalPosition = finalColumn?.positions?.[0] || null;
     const champion = getFinalWinner(finalPosition?.match, bracket);
     const championLayout = champion && finalColumn && finalPosition

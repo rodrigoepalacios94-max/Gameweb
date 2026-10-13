@@ -1,13 +1,15 @@
 import { canPlayerRegisterInCategory } from "../utils/categoryRules";
-import { DEFAULT_MATCH_FORMAT } from "../utils/matchFormat";
+import { DEFAULT_MATCH_FORMAT, formatResultSets, normalizeMatchFormat } from "../utils/matchFormat";
+import { hasRealSportingResult } from "../utils/sportingResults";
 import { auditService } from "./auditService";
 import { categoryService } from "./categoryService";
 import { emailService } from "./emailService";
 import { playerService } from "./playerService";
 import { createDataError, ensureSupabaseDataClient, logSupabaseDataError } from "./supabaseDataUtils";
-import { getTournamentCategoryParticipants, tournamentStageService } from "./tournamentStageService";
+import { getPublicTournamentCategoryParticipants, getTournamentCategoryParticipants, tournamentStageService } from "./tournamentStageService";
 import { schedulingService } from "./schedulingService";
 import { recommendTournamentFormat, TOURNAMENT_FORMATS } from "./tournamentCategoryService";
+import { countParticipantsByTournamentCategory } from "../utils/tournamentParticipantCounts";
 
 function isOpenTournament(tournament) {
   return tournament?.status === "Inscripciones abiertas";
@@ -30,6 +32,310 @@ function sortTournamentsNewestFirst(tournaments = []) {
     createdDateValue(b) - createdDateValue(a) ||
     String(b.id || b.name).localeCompare(String(a.id || a.name), undefined, { numeric: true }),
   );
+}
+
+function playerFullName(player) {
+  return `${player?.first_name || player?.firstName || ""} ${player?.last_name || player?.lastName || ""}`.trim();
+}
+
+function formatPreliminarySchedule(match) {
+  if (!match?.scheduled_at) return "";
+  const date = new Date(match.scheduled_at);
+  if (Number.isNaN(date.getTime())) return "";
+  const dateLabel = new Intl.DateTimeFormat("es-AR", {
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "America/Argentina/Buenos_Aires",
+  }).format(date);
+  const timeLabel = new Intl.DateTimeFormat("es-AR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "America/Argentina/Buenos_Aires",
+  }).format(date);
+  return [dateLabel, timeLabel, match.court].filter(Boolean).join(" · ");
+}
+
+function matchStatusLabel(match, fallback = "") {
+  if (match?.status === "finished") return "Finalizado";
+  if (match?.status === "in_progress") return "En juego";
+  if (match?.status === "scheduled") return "Programado";
+  if (match?.player1_id && match?.player2_id) return "Pendiente";
+  return fallback || "Pendiente";
+}
+
+function orderedSets(sets = []) {
+  return [...sets]
+    .sort((a, b) => Number(a.set_number || 0) - Number(b.set_number || 0))
+    .map((set) => ({
+      playerAScore: Number(set.player1_score || 0),
+      playerBScore: Number(set.player2_score || 0),
+      type: set.set_type || "set",
+    }));
+}
+
+function matchResultLabel(match) {
+  if (match?.result_text) return match.result_text;
+  const sets = orderedSets(match?.match_sets || []);
+  return sets.length ? formatResultSets(sets) : "";
+}
+
+function mapMatchPlayerNames(rows = []) {
+  return new Map((rows || []).map((row) => [row.match_id || row.matchId, {
+    matchId: row.match_id || row.matchId,
+    player1Id: row.player1_id || row.player1Id || null,
+    player1Name: row.player1_name || row.player1Name || "",
+    player2Id: row.player2_id || row.player2Id || null,
+    player2Name: row.player2_name || row.player2Name || "",
+  }]).filter(([matchId]) => Boolean(matchId)));
+}
+
+async function fetchTournamentMatchPlayerNames(client, tournamentId, categoryId = null) {
+  const { data, error } = await client.rpc("game_get_tournament_match_player_names", {
+    p_tournament_id: tournamentId,
+    p_category_id: categoryId,
+  });
+  if (error) {
+    logSupabaseDataError("tournament match player names", error);
+    throw createDataError("No pudimos cargar los nombres del cuadro.", { cause: error });
+  }
+  return mapMatchPlayerNames(data || []);
+}
+
+function nameForMatchSide(namesByMatchId, matchId, side, fallbackPlayer = null, fallbackName = "") {
+  const names = namesByMatchId?.get(matchId);
+  const rpcName = side === "A" ? names?.player1Name : names?.player2Name;
+  if (rpcName) return rpcName;
+  const joinedName = playerFullName(fallbackPlayer);
+  if (joinedName) return joinedName;
+  return fallbackName || "";
+}
+
+function winnerNameForMatch(namesByMatchId, match, fallbackWinner = "") {
+  if (!match?.winner_id) return fallbackWinner || null;
+  const names = namesByMatchId?.get(match.id);
+  if (match.winner_id === match.player1_id) return names?.player1Name || playerFullName(match.player1) || fallbackWinner || null;
+  if (match.winner_id === match.player2_id) return names?.player2Name || playerFullName(match.player2) || fallbackWinner || null;
+  return fallbackWinner || null;
+}
+
+function bracketRoundMatchIds(bracket) {
+  return [...new Set((bracket?.rounds || [])
+    .flatMap((round) => round.matches || [])
+    .map((match) => match.matchId)
+    .filter(Boolean))];
+}
+
+async function enrichBracketPreliminaries(client, bracket, tournamentCategoryId, namesByMatchId = new Map()) {
+  if (!bracket?.preliminaries?.length || !tournamentCategoryId) return bracket;
+  const matchIds = bracket.preliminaries.map((match) => match.matchId).filter(Boolean);
+  if (!matchIds.length) return bracket;
+  const { data, error } = await client
+    .from("matches")
+    .select(`
+      id,
+      status,
+      scheduled_at,
+      court,
+      player1_id,
+      player2_id,
+      winner_id,
+      result_type,
+      result_text,
+      player1:player1_id (
+        first_name,
+        last_name
+      ),
+      player2:player2_id (
+        first_name,
+        last_name
+      )
+    `)
+    .eq("tournament_category_id", tournamentCategoryId)
+    .in("id", matchIds);
+  if (error) {
+    logSupabaseDataError("tournament bracket preliminaries enrichment", error);
+    return bracket;
+  }
+  const matchesById = new Map((data || []).map((match) => [match.id, match]));
+  return {
+    ...bracket,
+    preliminaries: bracket.preliminaries.map((preliminary) => {
+      const match = matchesById.get(preliminary.matchId);
+      if (!match?.player1_id || !match?.player2_id) return preliminary;
+      const playerA = nameForMatchSide(namesByMatchId, match.id, "A", match.player1, preliminary.playerA);
+      const playerB = match.result_type === "BYE" ? "BYE" : nameForMatchSide(namesByMatchId, match.id, "B", match.player2, preliminary.playerB);
+      const scheduleLabel = formatPreliminarySchedule(match);
+      return {
+        ...preliminary,
+        playerA,
+        playerB,
+        status: matchStatusLabel(match, preliminary.status),
+        winner: preliminary.winner || winnerNameForMatch(namesByMatchId, match),
+        result: match.result_text || preliminary.result || scheduleLabel,
+        scheduledAt: match.scheduled_at || preliminary.scheduledAt || null,
+        court: match.court || preliminary.court || null,
+        scheduleLabel,
+      };
+    }),
+  };
+}
+
+async function enrichBracketZoneMatches(client, bracket, tournamentCategoryId, namesByMatchId = new Map()) {
+  if (!bracket?.zones?.length || !tournamentCategoryId) return bracket;
+  const { data, error } = await client
+    .from("matches")
+    .select(`
+      id,
+      zone_id,
+      phase,
+      round_name,
+      bracket_slot,
+      status,
+      player1_id,
+      player2_id,
+      winner_id,
+      result_type,
+      result_text,
+      result_detail,
+      player1:player1_id (
+        first_name,
+        last_name
+      ),
+      player2:player2_id (
+        first_name,
+        last_name
+      ),
+      match_sets (
+        set_number,
+        player1_score,
+        player2_score,
+        set_type
+      )
+    `)
+    .eq("tournament_category_id", tournamentCategoryId)
+    .eq("phase", "Zonas");
+  if (error) {
+    logSupabaseDataError("tournament bracket zone matches enrichment", error);
+    return bracket;
+  }
+
+  const matchesByZoneId = new Map();
+  const matchesByZoneName = new Map();
+  (data || [])
+    .sort((a, b) =>
+      String(a.round_name || "").localeCompare(String(b.round_name || ""), undefined, { numeric: true }) ||
+      Number(a.bracket_slot || 0) - Number(b.bracket_slot || 0) ||
+      String(a.id).localeCompare(String(b.id), undefined, { numeric: true })
+    )
+    .forEach((match) => {
+      const zoneMatches = matchesByZoneId.get(match.zone_id) || [];
+      zoneMatches.push(match);
+      matchesByZoneId.set(match.zone_id, zoneMatches);
+      const namedMatches = matchesByZoneName.get(match.round_name) || [];
+      namedMatches.push(match);
+      matchesByZoneName.set(match.round_name, namedMatches);
+    });
+
+  return {
+    ...bracket,
+    zones: bracket.zones.map((zone) => {
+      const zoneMatches = matchesByZoneId.get(zone.id) || matchesByZoneId.get(zone.tempId) || matchesByZoneName.get(zone.name) || [];
+      if (!zoneMatches.length) return zone;
+      return {
+        ...zone,
+        matches: zoneMatches.map((match) => ({
+          id: match.id,
+          playerAId: match.player1_id,
+          playerA: match.player1_id ? nameForMatchSide(namesByMatchId, match.id, "A", match.player1, "A definir") : "A definir",
+          playerBId: match.player2_id,
+          playerB: match.result_type === "BYE"
+            ? "BYE"
+            : match.player2_id
+              ? nameForMatchSide(namesByMatchId, match.id, "B", match.player2, "A definir")
+              : "A definir",
+          status: match.result_type === "WO"
+            ? "W.O."
+            : match.result_type === "DOUBLE_WO"
+              ? "Doble W.O."
+              : matchStatusLabel(match, "Pendiente"),
+          result: matchResultLabel(match),
+          winnerId: match.winner_id || null,
+          resultType: match.result_type || "NORMAL",
+          resultDetail: match.result_detail || {},
+        })),
+      };
+    }),
+  };
+}
+
+async function enrichBracketRoundMatches(client, bracket, tournamentCategoryId, namesByMatchId = new Map()) {
+  const matchIds = bracketRoundMatchIds(bracket);
+  if (!matchIds.length || !tournamentCategoryId) return bracket;
+  const { data, error } = await client
+    .from("matches")
+    .select(`
+      id,
+      status,
+      scheduled_at,
+      court,
+      player1_id,
+      player2_id,
+      winner_id,
+      result_type,
+      result_text,
+      result_detail,
+      match_sets (
+        set_number,
+        player1_score,
+        player2_score,
+        set_type
+      )
+    `)
+    .eq("tournament_category_id", tournamentCategoryId)
+    .in("id", matchIds);
+  if (error) {
+    logSupabaseDataError("tournament bracket round matches enrichment", error);
+    return bracket;
+  }
+  const matchesById = new Map((data || []).map((match) => [match.id, match]));
+  return {
+    ...bracket,
+    rounds: (bracket.rounds || []).map((round) => ({
+      ...round,
+      matches: (round.matches || []).map((bracketMatch) => {
+        const match = matchesById.get(bracketMatch.matchId);
+        if (!match) return bracketMatch;
+        const playerAId = match.player1_id || bracketMatch.playerAId || null;
+        const playerBId = match.player2_id || bracketMatch.playerBId || null;
+        const playerA = playerAId
+          ? nameForMatchSide(namesByMatchId, match.id, "A", null, bracketMatch.playerA)
+          : bracketMatch.playerA;
+        const playerB = match.result_type === "BYE"
+          ? "BYE"
+          : playerBId
+            ? nameForMatchSide(namesByMatchId, match.id, "B", null, bracketMatch.playerB)
+            : bracketMatch.playerB;
+        return {
+          ...bracketMatch,
+          playerAId,
+          playerBId,
+          playerA,
+          playerB,
+          winner: winnerNameForMatch(namesByMatchId, match, bracketMatch.winner),
+          score: matchResultLabel(match) || bracketMatch.score,
+          result: matchResultLabel(match) || bracketMatch.result,
+          status: matchStatusLabel(match, bracketMatch.status),
+          scheduledAt: match.scheduled_at || bracketMatch.scheduledAt || null,
+          court: match.court || bracketMatch.court || null,
+          walkover: match.result_type === "WO" || bracketMatch.walkover,
+          doubleWalkover: match.result_type === "DOUBLE_WO" || bracketMatch.doubleWalkover,
+          bye: match.result_type === "BYE" || bracketMatch.bye,
+        };
+      }),
+    })),
+  };
 }
 
 function playerHasTournamentRelation(db, tournament, playerId) {
@@ -86,6 +392,21 @@ const tournamentListBaseSelect = `
   status,
   start_date,
   end_date
+`;
+
+const playerTournamentListSelect = `
+  id,
+  name,
+  description,
+  start_date,
+  end_date,
+  registration_close_date,
+  semifinals_date,
+  finals_date,
+  status,
+  price_per_category,
+  created_at,
+  updated_at
 `;
 
 const ADMIN_TOURNAMENT_LIST_SELECT = "id,name,status,start_date,end_date";
@@ -171,21 +492,6 @@ function mapStage(row) {
   };
 }
 
-function normalizeDateInput(value, fallback = new Date()) {
-  const date = value instanceof Date ? value : new Date(value ?? fallback);
-  return Number.isNaN(date.getTime()) ? fallback : date;
-}
-
-function isEligibleRegistration(registration, now = new Date()) {
-  const nowDate = normalizeDateInput(now);
-  if (!registration || registration.status === "cancelled") return false;
-  if (["paid", "waived"].includes(registration.payment_status)) return true;
-  if (registration.payment_status !== "pending") return false;
-  if (!registration.payment_due_at) return true;
-  const dueAt = new Date(registration.payment_due_at);
-  return !Number.isNaN(dueAt.getTime()) && dueAt.getTime() >= nowDate.getTime();
-}
-
 function withTournamentLoadMeta(error, meta) {
   return {
     ...error,
@@ -215,7 +521,8 @@ function logAdminTournamentsLoadError(error, meta = {}) {
 }
 
 function logAdminTournamentCreateError(error, meta = {}) {
-  if (!import.meta.env.DEV || !error) return;
+  const dev = typeof import.meta !== "undefined" && import.meta.env?.DEV;
+  if (!dev || !error) return;
   console.error("[GAME Admin] create tournament error", {
     table: meta.table || error.table || null,
     select: meta.select || error.select || null,
@@ -229,7 +536,8 @@ function logAdminTournamentCreateError(error, meta = {}) {
 }
 
 function logAdminTournamentDetailError(error, meta = {}) {
-  if (!import.meta.env.DEV || !error) return;
+  const dev = typeof import.meta !== "undefined" && import.meta.env?.DEV;
+  if (!dev || !error) return;
   console.error("[GAME Admin] tournament detail load error", {
     table: meta.table || error.table || null,
     select: meta.select || error.select || null,
@@ -243,7 +551,8 @@ function logAdminTournamentDetailError(error, meta = {}) {
 }
 
 function logTournamentDeleteError(error, meta = {}) {
-  if (!import.meta.env.DEV || !error) return;
+  const dev = typeof import.meta !== "undefined" && import.meta.env?.DEV;
+  if (!dev || !error) return;
   console.error("[GAME Admin] tournament delete error", {
     table: meta.table || error.table || null,
     select: meta.select || error.select || null,
@@ -297,6 +606,123 @@ function validateTournamentDates(payload = {}) {
   }
 }
 
+function toDateInputValue(date) {
+  if (!date) return "";
+  const value = new Date(`${date}T12:00:00`);
+  if (Number.isNaN(value.getTime())) return "";
+  return value.toISOString().slice(0, 10);
+}
+
+function previousDateValue(date) {
+  const value = new Date(`${date}T12:00:00`);
+  if (Number.isNaN(value.getTime())) return date || "";
+  value.setDate(value.getDate() - 1);
+  return value.toISOString().slice(0, 10);
+}
+
+function normalizeTournamentDateUpdate(payload = {}) {
+  const startDate = toDateInputValue(payload.startDate || payload.start_date);
+  const endDate = toDateInputValue(payload.endDate || payload.end_date || payload.finalsDate || payload.finals_date);
+  validateTournamentDates({ startDate, endDate });
+  const semifinalsDate = endDate && startDate && dateValue(endDate) > dateValue(startDate)
+    ? previousDateValue(endDate)
+    : endDate;
+  return {
+    startDate,
+    endDate,
+    semifinalsDate,
+    finalsDate: endDate,
+  };
+}
+
+function hasTournamentStartedMatch(match) {
+  if (match?.result_type === "BYE") return false;
+  return ["finished", "in_progress", "standby"].includes(match?.status) || Boolean(match?.winner_id);
+}
+
+function matchFormatsEqual(left, right) {
+  return JSON.stringify(normalizeMatchFormat(left || DEFAULT_MATCH_FORMAT)) === JSON.stringify(normalizeMatchFormat(right || DEFAULT_MATCH_FORMAT));
+}
+
+function validateMatchFormatUpdate(format) {
+  const normalized = normalizeMatchFormat(format || DEFAULT_MATCH_FORMAT);
+  if (!Number.isInteger(normalized.bestOfSets) || normalized.bestOfSets < 1 || normalized.bestOfSets > 5) {
+    throw createDataError("La cantidad de sets debe estar entre 1 y 5.");
+  }
+  if (!Number.isInteger(normalized.gamesPerSet) || normalized.gamesPerSet < 1) {
+    throw createDataError("Los games por set deben ser un numero valido.");
+  }
+  return normalized;
+}
+
+function normalizeParticipantIds(playerIds = []) {
+  return [...new Set((playerIds || []).filter(Boolean).map(String))].sort();
+}
+
+function participantSignature(playerIds = []) {
+  return normalizeParticipantIds(playerIds).join("|");
+}
+
+function stageBaselineParticipantIds(stage) {
+  const snapshot = stage?.metadata?.reopenParticipantSnapshot;
+  if (Array.isArray(snapshot?.participantIds)) return snapshot.participantIds;
+  if (Array.isArray(stage?.metadata?.participants)) return stage.metadata.participants;
+  if (Array.isArray(stage?.participants)) return stage.participants;
+  return [];
+}
+
+function hasExceptionalRegenerationAuthorization(stage) {
+  const authorization = stage?.metadata?.exceptionalRegeneration;
+  return Boolean(authorization?.enabled && !authorization?.consumedAt);
+}
+
+async function fetchParticipantSignaturesForStageIds(stageIds = []) {
+  const ids = [...new Set(stageIds.filter(Boolean))];
+  const empty = new Map(ids.map((id) => [id, { participantIds: [], signature: "", count: 0 }]));
+  if (!ids.length) return empty;
+  const client = ensureSupabaseDataClient();
+  const selectParticipantRows = `
+      player_id,
+      status,
+      registration_categories!inner (
+        tournament_category_id,
+        status
+      )
+    `;
+  const { data, error } = await client
+    .from("registrations")
+    .select(selectParticipantRows)
+    .in("registration_categories.tournament_category_id", ids);
+  if (error) {
+    const loggedError = withTournamentLoadMeta(error, {
+      table: "registrations",
+      select: selectParticipantRows,
+      filter: `registration_categories.tournament_category_id in (${ids.join(",")})`,
+    });
+    logSupabaseDataError("tournament category participant signatures", loggedError);
+    throw createDataError("No pudimos validar cambios de participantes.", { cause: loggedError });
+  }
+
+  const byStage = new Map(ids.map((id) => [id, new Set()]));
+  (data || []).forEach((registration) => {
+    if (!registration?.player_id || registration.status === "cancelled") return;
+    (registration.registration_categories || []).forEach((item) => {
+      if (!item?.tournament_category_id || item.status === "cancelled") return;
+      if (!byStage.has(item.tournament_category_id)) return;
+      byStage.get(item.tournament_category_id).add(registration.player_id);
+    });
+  });
+
+  return new Map([...byStage.entries()].map(([stageId, idsSet]) => {
+    const participantIds = normalizeParticipantIds([...idsSet]);
+    return [stageId, {
+      participantIds,
+      signature: participantSignature(participantIds),
+      count: participantIds.length,
+    }];
+  }));
+}
+
 async function attachScoringSystems(rows = [], { optional = false } = {}) {
   const scoringIds = [...new Set(rows.map((row) => row.scoring_system_id).filter(Boolean))];
   if (!scoringIds.length) return rows;
@@ -334,10 +760,9 @@ async function attachParticipantCounts(stages = [], { optional = false } = {}) {
   const selectParticipantCounts = `
       player_id,
       status,
-      payment_status,
-      payment_due_at,
       registration_categories!inner (
-        tournament_category_id
+        tournament_category_id,
+        status
       )
     `;
   const { data, error } = await client
@@ -358,24 +783,38 @@ async function attachParticipantCounts(stages = [], { optional = false } = {}) {
     logSupabaseDataError("tournament category participant counts", loggedError);
     throw createDataError("No pudimos cargar las cantidades de participantes.", { cause: loggedError });
   }
-  const counts = new Map(stageIds.map((id) => [id, new Set()]));
-  (data || []).filter((registration) => isEligibleRegistration(registration)).forEach((registration) => {
-    (registration.registration_categories || []).forEach((item) => {
-      if (!counts.has(item.tournament_category_id)) return;
-      counts.get(item.tournament_category_id).add(registration.player_id);
-    });
-  });
+  const counts = countParticipantsByTournamentCategory(data || [], stageIds);
   return stages.map((stage) => {
-    const participantIds = [...(counts.get(stage.id) || [])];
+    const participantCount = Number(counts.get(stage.id) || 0);
     return {
       ...stage,
-      participants: participantIds,
-      inscriptionsCount: participantIds.length,
-      recommendedFormat: stage.recommendedFormat || recommendTournamentFormat(participantIds.length) || "",
-      formatStatus: participantIds.length ? stage.formatStatus : "empty",
-      status: participantIds.length ? stage.status : "Sin inscriptos",
+      inscriptionsCount: participantCount,
+      recommendedFormat: stage.recommendedFormat || recommendTournamentFormat(participantCount) || "",
+      formatStatus: participantCount ? stage.formatStatus : "empty",
+      status: participantCount ? stage.status : "Sin inscriptos",
     };
   });
+}
+
+async function countUniqueTournamentPlayers(tournamentId) {
+  if (!tournamentId) return 0;
+  const client = ensureSupabaseDataClient();
+  const selectUniquePlayerIds = "player_id";
+  const { data, error } = await client
+    .from("registrations")
+    .select(selectUniquePlayerIds)
+    .eq("tournament_id", tournamentId)
+    .neq("status", "cancelled");
+  if (error) {
+    const loggedError = withTournamentLoadMeta(error, {
+      table: "registrations",
+      select: selectUniquePlayerIds,
+      filter: `tournament_id eq ${tournamentId}, status neq cancelled`,
+    });
+    logSupabaseDataError("tournament unique player count", loggedError);
+    throw createDataError("No pudimos contar los jugadores inscriptos.", { cause: loggedError });
+  }
+  return new Set((data || []).map((row) => row.player_id).filter(Boolean)).size;
 }
 
 async function getStagesForTournaments(tournamentIds = [], { optional = false } = {}) {
@@ -443,6 +882,66 @@ async function fetchTournamentListRows() {
     ...baseRow,
     ...(enrichedById.get(baseRow.id) || {}),
   }));
+}
+
+async function fetchPlayerTournamentRows({ enrolledTournamentIds = [], includeOpen = true } = {}) {
+  const client = ensureSupabaseDataClient();
+  const [openResult, enrolledResult] = await Promise.all([
+    includeOpen
+      ? client
+        .from("tournaments")
+        .select(playerTournamentListSelect)
+        .eq("status", "open")
+        .order("start_date", { ascending: true })
+      : Promise.resolve({ data: [], error: null }),
+    enrolledTournamentIds.length
+      ? client
+        .from("tournaments")
+        .select(playerTournamentListSelect)
+        .in("id", enrolledTournamentIds)
+        .order("start_date", { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (openResult.error) {
+    const loggedError = withTournamentLoadMeta(openResult.error, {
+      table: "tournaments",
+      select: playerTournamentListSelect,
+      filter: "status eq open",
+    });
+    logSupabaseDataError("player visible tournaments open", loggedError);
+    throw createDataError("No pudimos cargar los torneos disponibles.", { cause: loggedError });
+  }
+  if (enrolledResult.error) {
+    const loggedError = withTournamentLoadMeta(enrolledResult.error, {
+      table: "tournaments",
+      select: playerTournamentListSelect,
+      filter: `id in (${enrolledTournamentIds.join(",")})`,
+    });
+    logSupabaseDataError("player visible tournaments enrolled", loggedError);
+    throw createDataError("No pudimos cargar tus torneos.", { cause: loggedError });
+  }
+
+  const byId = new Map();
+  [...(openResult.data || []), ...(enrolledResult.data || [])].forEach((row) => {
+    if (row?.id) byId.set(row.id, row);
+  });
+  return sortTournamentsNewestFirst([...byId.values()]);
+}
+
+async function fetchPlayerTournamentRelations(playerId) {
+  if (!playerId) return [];
+  const client = ensureSupabaseDataClient();
+  const { data, error } = await client
+    .from("registrations")
+    .select("tournament_id")
+    .eq("player_id", playerId)
+    .neq("status", "cancelled");
+  if (error) {
+    logSupabaseDataError("player visible tournament relations", error);
+    throw createDataError("No pudimos cargar tus torneos.", { cause: error });
+  }
+  return [...new Set((data || []).map((row) => row.tournament_id).filter(Boolean))];
 }
 
 function mapTournament(row, stages = []) {
@@ -579,19 +1078,17 @@ export const tournamentService = {
     const stages = await getStagesForTournaments(tournamentRows.map((item) => item.id), { optional: true });
     return sortTournamentsNewestFirst(tournamentRows.map((row) => mapTournament(row, stages.get(row.id) || [])));
   },
-  async getVisibleTournamentsForPlayer(playerId) {
-    const [player, tournaments] = await Promise.all([playerService.getPlayerById(playerId), this.getTournaments()]);
+  async getVisibleTournamentsForPlayer(playerId, { currentPlayer = null } = {}) {
+    const enrolledTournamentIds = await fetchPlayerTournamentRelations(playerId);
+    const player = currentPlayer || await playerService.getPlayerById(playerId, { includeBenefits: false, includeDiscipline: false, includeRankings: false });
     if (!player) return [];
+    const includeOpen = Boolean(player.categoryId && player.category && !player.status?.includes("Bloqueado"));
+    const tournamentRows = await fetchPlayerTournamentRows({ enrolledTournamentIds, includeOpen });
     const enrolled = new Set();
-    const client = ensureSupabaseDataClient();
-    const { data, error } = await client.from("registrations").select("tournament_id").eq("player_id", playerId).neq("status", "cancelled");
-    if (error) {
-      logSupabaseDataError("player tournament relations", error);
-      throw createDataError("No pudimos cargar los torneos del jugador.", { cause: error });
-    }
-    (data || []).forEach((row) => enrolled.add(row.tournament_id));
-    const categories = await categoryService.getCategories();
-    const playerCategory = categories.find((category) => category.id === player.categoryId);
+    enrolledTournamentIds.forEach((tournamentId) => enrolled.add(tournamentId));
+    const stages = await getStagesForTournaments(tournamentRows.map((item) => item.id), { optional: true });
+    const tournaments = tournamentRows.map((row) => mapTournament(row, stages.get(row.id) || []));
+    const playerCategory = player.category || null;
     return tournaments.filter((tournament) => {
       if (enrolled.has(tournament.id)) return true;
       if (!isOpenTournament(tournament) || player.status?.includes("Bloqueado")) return false;
@@ -602,13 +1099,17 @@ export const tournamentService = {
     const tournaments = await this.getVisibleTournamentsForPlayer(playerId);
     return tournaments.some((tournament) => tournament.id === id);
   },
-  async getPlayerTournamentById(id, playerId) {
-    const canAccess = await this.canPlayerAccessTournament(id, playerId);
+  async getPlayerTournamentById(id, playerId, options = {}) {
+    const canAccess = await this.getVisibleTournamentsForPlayer(playerId, options)
+      .then((tournaments) => tournaments.some((tournament) => tournament.id === id));
     if (!canAccess) return null;
     return fetchTournament(id);
   },
   async getTournamentById(id) {
     return fetchTournament(id);
+  },
+  async getUniquePlayerCount(id) {
+    return countUniqueTournamentPlayers(id);
   },
   async getTournamentBracket(id, categoryId = null) {
     const client = ensureSupabaseDataClient();
@@ -656,7 +1157,10 @@ export const tournamentService = {
       throw createDataError("No pudimos cargar el cuadro.", { cause: error });
     }
     if (!data) return null;
-    const bracket = data.bracket_data || {};
+    const matchNamesById = await fetchTournamentMatchPlayerNames(client, id, categoryId || data.tournament_categories?.category_id || data.tournament_category_id);
+    const preliminaryBracket = await enrichBracketPreliminaries(client, data.bracket_data || {}, data.tournament_category_id, matchNamesById);
+    const zoneBracket = await enrichBracketZoneMatches(client, preliminaryBracket, data.tournament_category_id, matchNamesById);
+    const bracket = await enrichBracketRoundMatches(client, zoneBracket, data.tournament_category_id, matchNamesById);
     const championName = `${data.champion?.first_name || ""} ${data.champion?.last_name || ""}`.trim();
     return {
       ...bracket,
@@ -670,7 +1174,7 @@ export const tournamentService = {
       champion: bracket.champion || championName || null,
     };
   },
-  async getTournamentParticipants(id, categoryId = null) {
+  async getTournamentParticipants(id, categoryId = null, options = {}) {
     const client = ensureSupabaseDataClient();
     if (categoryId) {
       const { data: stage, error: stageError } = await client
@@ -684,16 +1188,37 @@ export const tournamentService = {
         throw createDataError("No pudimos cargar los participantes.", { cause: stageError });
       }
       if (!stage?.id) return [];
-      return getTournamentCategoryParticipants(stage.id, { categoryId: stage.category_id });
+      return getTournamentCategoryParticipants(stage.id, { categoryId: stage.category_id, ...options });
     }
     const stages = await this.getTournamentCategoryStages(id);
-    const rows = await Promise.all(stages.map((stage) => getTournamentCategoryParticipants(stage.id, { categoryId: stage.categoryId })));
+    const rows = await Promise.all(stages.map((stage) => getTournamentCategoryParticipants(stage.id, { categoryId: stage.categoryId, ...options })));
     const seen = new Set();
     return rows.flat().filter((player) => {
       if (!player?.id || seen.has(player.id)) return false;
       seen.add(player.id);
       return true;
     });
+  },
+  async getPublicTournamentParticipants(id, categoryId = null) {
+    if (!categoryId) return [];
+    const client = ensureSupabaseDataClient();
+    const { data: stage, error: stageError } = await client
+      .from("tournament_categories")
+      .select("id, category_id")
+      .eq("tournament_id", id)
+      .eq("category_id", categoryId)
+      .maybeSingle();
+    if (stageError) {
+      logSupabaseDataError("public tournament participants stage lookup", {
+        ...stageError,
+        table: "tournament_categories",
+        select: "id, category_id",
+        filter: `tournament_id eq ${id}, category_id eq ${categoryId}`,
+      });
+      throw createDataError("No pudimos cargar los participantes.", { cause: stageError });
+    }
+    if (!stage?.id) return [];
+    return getPublicTournamentCategoryParticipants(stage.id, { categoryId: stage.category_id });
   },
   async getTournamentCategories(id) {
     const stages = await this.getTournamentCategoryStages(id);
@@ -789,26 +1314,165 @@ export const tournamentService = {
     });
     return tournament;
   },
+  async updateTournamentMatchFormat(id, matchFormat, actor = "admin-1") {
+    const client = ensureSupabaseDataClient();
+    const normalized = validateMatchFormatUpdate(matchFormat);
+    const tournament = await fetchTournament(id);
+    if (!tournament) throw createDataError("No encontramos el torneo.");
+    if (matchFormatsEqual(tournament.matchFormat, normalized)) return tournament;
+
+    const { data: matches, error: matchesError } = await client
+      .from("matches")
+      .select(`
+        id,
+        status,
+        result_type,
+        winner_id,
+        loser_id,
+        result_text,
+        result_detail,
+        match_sets (
+          id
+        )
+      `)
+      .eq("tournament_id", id);
+    if (matchesError) {
+      logSupabaseDataError("tournament match format result check", matchesError);
+      throw createDataError("No pudimos validar si el formato puede modificarse.", { cause: matchesError });
+    }
+    const sportingResults = (matches || []).filter(hasRealSportingResult);
+    if (sportingResults.length) {
+      throw createDataError("No se puede cambiar el formato porque ya hay resultados deportivos cargados.");
+    }
+
+    const { error: categoryError } = await client
+      .from("tournament_categories")
+      .update({ match_format: normalized })
+      .eq("tournament_id", id);
+    if (categoryError) {
+      logSupabaseDataError("tournament category match format update", categoryError);
+      throw createDataError("No pudimos actualizar el formato de las categorias.", { cause: categoryError });
+    }
+
+    const { error: tournamentError } = await client
+      .from("tournaments")
+      .update({ match_format: normalized })
+      .eq("id", id);
+    if (tournamentError) {
+      logSupabaseDataError("tournament match format update", tournamentError);
+      throw createDataError("No pudimos actualizar el formato del torneo.", { cause: tournamentError });
+    }
+
+    await auditService.record({
+      action: "update_tournament_match_format",
+      entityType: "tournament",
+      entityId: id,
+      description: "Formato de partidos actualizado sin regenerar estructura deportiva.",
+      actor,
+    });
+    return fetchTournament(id);
+  },
+  async canEditTournamentDates(id) {
+    const tournament = await fetchTournament(id);
+    if (!tournament) return { ok: false, reason: "No encontramos el torneo." };
+    if (["Finalizado", "Cancelado", "En juego"].includes(tournament.status)) {
+      return { ok: false, reason: "Las fechas no pueden modificarse una vez iniciado el torneo." };
+    }
+    const client = ensureSupabaseDataClient();
+    const { data, error } = await client
+      .from("matches")
+      .select("id, status, result_type, winner_id")
+      .eq("tournament_id", id);
+    if (error) {
+      logSupabaseDataError("tournament date edit match check", error);
+      throw createDataError("No pudimos validar si las fechas pueden modificarse.", { cause: error });
+    }
+    if ((data || []).some(hasTournamentStartedMatch)) {
+      return { ok: false, reason: "Las fechas no pueden modificarse una vez iniciado el torneo." };
+    }
+    return { ok: true, tournament };
+  },
+  async updateTournamentDates(id, updates, actor = "admin-1") {
+    const validation = await this.canEditTournamentDates(id);
+    if (!validation.ok) throw createDataError(validation.reason);
+    const dates = normalizeTournamentDateUpdate(updates);
+    if (!dates.startDate || !dates.endDate) {
+      throw createDataError("Completá fecha de inicio y fecha final del torneo.");
+    }
+    const tournament = await this.updateTournament(id, dates, actor);
+    await schedulingService.clearTournamentScheduleForDateEdit(id);
+    const schedule = await schedulingService.recalculateSchedule(id, {
+      preserveScheduled: false,
+      startOffsetWeeks: 0,
+      slotFilter: (slot) => slot.date >= dates.startDate && slot.date <= dates.endDate,
+    });
+    await auditService.record({
+      action: "update_tournament_dates",
+      entityType: "tournament",
+      entityId: id,
+      description: `Fechas actualizadas: ${dates.startDate} a ${dates.endDate}.`,
+      actor,
+    });
+    return { tournament, schedule };
+  },
   async closeRegistrations(id, actor = "admin-1") {
     const tournament = await this.updateTournament(id, { status: "Inscripciones cerradas" }, actor);
     const stages = await this.getTournamentCategoryStages(id);
-    const shouldRegenerate = stages.some((stage) => stage.stageStatus === "dirty" && stage.formatStatus === "confirmed");
-    if (!shouldRegenerate) return tournament;
-    const generated = await tournamentStageService.generateAllCategoryStages(id);
-    const schedule = await schedulingService.recalculateSchedule(id, { preserveScheduled: false, startOffsetWeeks: 0 });
+    const signatures = await fetchParticipantSignaturesForStageIds(stages.map((stage) => stage.id));
+    const changedStages = stages.filter((stage) => {
+      if (stage.formatStatus !== "confirmed") return false;
+      const currentSignature = signatures.get(stage.id)?.signature || "";
+      const baselineSignature = participantSignature(stageBaselineParticipantIds(stage));
+      return currentSignature !== baselineSignature;
+    });
+    const client = ensureSupabaseDataClient();
+
+    await Promise.all(stages.map(async (stage) => {
+      const current = signatures.get(stage.id) || { participantIds: [], signature: "", count: 0 };
+      const participantChanged = changedStages.some((item) => item.id === stage.id);
+      const metadata = {
+        ...(stage.metadata || {}),
+        participants: current.participantIds,
+        inscriptionsCount: current.count,
+        participantSignature: current.signature,
+        participantSignatureUpdatedAt: new Date().toISOString(),
+        reopenParticipantSnapshot: null,
+        regenerationRequired: participantChanged,
+        regenerationMarkedAt: participantChanged ? new Date().toISOString() : null,
+        regenerationReason: participantChanged ? "participant_list_changed_after_reopen" : null,
+      };
+      const { error } = await client
+        .from("tournament_categories")
+        .update(participantChanged
+          ? { stage_status: "dirty", status: "Pendiente de regeneracion", metadata }
+          : {
+            stage_status: stage.stageStatus,
+            status: stage.status,
+            metadata,
+          })
+        .eq("id", stage.id);
+      if (error) {
+        logSupabaseDataError("stage participant signature update after close", error);
+        throw createDataError("No pudimos actualizar el estado de las categorias.", { cause: error });
+      }
+    }));
+
+    if (!changedStages.length) return tournament;
+
     await auditService.record({
-      action: "regenerate_after_reopen",
+      action: "mark_weekly_generation_required",
       entityType: "tournament",
       entityId: id,
-      description: "Estructura regenerada automaticamente al volver a cerrar inscripciones.",
+      description: "Categorias marcadas para generacion en el cierre semanal por cambio real de participantes.",
       actor,
     });
     return {
       ...(await fetchTournament(id)),
       regenerationResult: {
-        generatedStages: generated.length,
-        scheduledCount: schedule?.scheduledCount || 0,
-        unscheduledCount: schedule?.unscheduledCount || 0,
+        pendingWeeklyGeneration: changedStages.length,
+        generatedStages: 0,
+        scheduledCount: 0,
+        unscheduledCount: 0,
       },
     };
   },
@@ -841,6 +1505,7 @@ export const tournamentService = {
     if (!validation.ok) throw createDataError(validation.reason);
     const client = ensureSupabaseDataClient();
     const stages = await this.getTournamentCategoryStages(id);
+    const signatures = await fetchParticipantSignaturesForStageIds(stages.map((stage) => stage.id));
     const { error: tournamentError } = await client
       .from("tournaments")
       .update({ status: "open" })
@@ -850,18 +1515,29 @@ export const tournamentService = {
       throw createDataError("No pudimos reabrir inscripciones.", { cause: tournamentError });
     }
     for (const stage of stages) {
+      const current = signatures.get(stage.id) || { participantIds: [], signature: "", count: 0 };
       const metadata = {
         ...(stage.metadata || {}),
-        regenerationRequired: true,
-        regenerationMarkedAt: new Date().toISOString(),
+        participants: current.participantIds,
+        inscriptionsCount: current.count,
+        participantSignature: current.signature,
+        reopenParticipantSnapshot: {
+          participantIds: current.participantIds,
+          signature: current.signature,
+          count: current.count,
+          capturedAt: new Date().toISOString(),
+        },
+        regenerationRequired: false,
+        regenerationMarkedAt: null,
+        regenerationReason: null,
       };
       const { error: stageError } = await client
         .from("tournament_categories")
-        .update({ stage_status: "dirty", status: "Pendiente de regeneracion", metadata })
+        .update({ metadata })
         .eq("id", stage.id);
       if (stageError) {
-        logSupabaseDataError("stage mark dirty after reopen", stageError);
-        throw createDataError("No pudimos marcar la estructura para regenerar.", { cause: stageError });
+        logSupabaseDataError("stage participant snapshot after reopen", stageError);
+        throw createDataError("No pudimos registrar el estado de participantes.", { cause: stageError });
       }
     }
     await auditService.record({
@@ -936,25 +1612,159 @@ export const tournamentService = {
       generated.push(stage.categoryName);
     }
 
-    const brackets = await tournamentStageService.generateAllCategoryStages(id);
-    const schedule = await schedulingService.recalculateSchedule(id, { preserveScheduled: true, startOffsetWeeks: 0 });
     const tournament = await fetchTournament(id);
     return {
       tournament,
       generatedCategories: generated,
       skippedCategories: skipped,
-      generatedStages: brackets.length,
-      schedule,
+      generatedStages: 0,
+      schedule: null,
+      pendingWeeklyGeneration: generated.length,
     };
   },
   async generateCategoryBracket(id, categoryId) {
     return tournamentStageService.generateStage(id, categoryId);
   },
+  async generatePendingWeeklyStagesAndSchedule(id, { schedulingContext = null, actor = "weekly_closure", scheduleAfterGeneration = true } = {}) {
+    const stages = await this.getTournamentCategoryStages(id);
+    const client = ensureSupabaseDataClient();
+    const [
+      { data: bracketRows, error: bracketError },
+      { data: zoneRows, error: zoneError },
+      { data: matchRows, error: matchError },
+    ] = await Promise.all([
+      client
+        .from("brackets")
+        .select("tournament_category_id")
+        .eq("tournament_id", id),
+      client
+        .from("zones")
+        .select("tournament_category_id")
+        .eq("tournament_id", id),
+      client
+        .from("matches")
+        .select("tournament_category_id")
+        .eq("tournament_id", id),
+    ]);
+    if (bracketError) {
+      logSupabaseDataError("weekly generation bracket lookup", bracketError);
+      throw createDataError("No pudimos revisar estructuras generadas.", { cause: bracketError });
+    }
+    if (zoneError) {
+      logSupabaseDataError("weekly generation zones lookup", zoneError);
+      throw createDataError("No pudimos revisar zonas generadas.", { cause: zoneError });
+    }
+    if (matchError) {
+      logSupabaseDataError("weekly generation matches lookup", matchError);
+      throw createDataError("No pudimos revisar partidos generados.", { cause: matchError });
+    }
+    const generatedStageIds = new Set([
+      ...(bracketRows || []).map((row) => row.tournament_category_id).filter(Boolean),
+      ...(zoneRows || []).map((row) => row.tournament_category_id).filter(Boolean),
+      ...(matchRows || []).map((row) => row.tournament_category_id).filter(Boolean),
+    ]);
+    const pendingStages = stages.filter((stage) =>
+      stage.formatStatus === "confirmed" &&
+      stage.inscriptionsCount > 0 &&
+      !generatedStageIds.has(stage.id)
+    );
+    if (!pendingStages.length) {
+      const schedule = scheduleAfterGeneration ? await schedulingService.scheduleGeneratedMatches(id) : null;
+      return { generatedStages: 0, schedule };
+    }
+
+    const generated = await tournamentStageService.generateAllCategoryStages(id, {
+      categoryIds: pendingStages.map((stage) => stage.categoryId),
+      schedulingContext,
+    });
+
+    await Promise.all(pendingStages.map(async (stage) => {
+      const metadata = {
+        ...(stage.metadata || {}),
+        regenerationRequired: false,
+        regenerationMarkedAt: null,
+        regenerationReason: null,
+        lastWeeklySportingGenerationAt: new Date().toISOString(),
+      };
+      const { error } = await client
+        .from("tournament_categories")
+        .update({ stage_status: "generated", metadata })
+        .eq("id", stage.id);
+      if (error) {
+        logSupabaseDataError("weekly generation clean stage", error);
+        throw createDataError("No pudimos confirmar la generacion semanal.", { cause: error });
+      }
+    }));
+
+    const schedule = scheduleAfterGeneration ? await schedulingService.scheduleGeneratedMatches(id) : null;
+    await auditService.record({
+      action: "weekly_sporting_generation",
+      entityType: "tournament",
+      entityId: id,
+      description: "Estructura deportiva generada en cierre semanal usando compatibilidad de disponibilidad como desempate.",
+      actor,
+    });
+    return {
+      generatedStages: generated.length,
+      schedule,
+    };
+  },
+  async closeWeeklySchedule(id, { weekStart, force = false, actor = "weekly_closure" } = {}) {
+    if (!weekStart) throw createDataError("Falta la semana para cerrar la programacion.");
+    const schedulingContext = await schedulingService.buildWeeklyGenerationContext(id, { weekStart });
+    const generation = await this.generatePendingWeeklyStagesAndSchedule(id, {
+      schedulingContext,
+      actor,
+      scheduleAfterGeneration: false,
+    });
+    const client = ensureSupabaseDataClient();
+    const { data, error } = await client.rpc("game_close_weekly_schedule", {
+      p_tournament_id: id,
+      p_week_start: weekStart,
+      p_force: force,
+    });
+    if (error) {
+      logSupabaseDataError("weekly schedule closure", error);
+      throw createDataError("No pudimos cerrar la programacion semanal.", { cause: error });
+    }
+    return {
+      ...generation,
+      closure: data,
+      contextSummary: {
+        weekStart,
+        physicalSlots: schedulingContext.slots.length,
+        playerAvailabilityResponses: schedulingContext.availabilityByPlayer.size,
+      },
+    };
+  },
+  async regenerateCategoryBracket(id, categoryId, actor = "admin-1") {
+    const stages = await this.getTournamentCategoryStages(id);
+    const stage = stages.find((item) => item.categoryId === categoryId);
+    if (!stage) throw createDataError("No encontramos la categoria del torneo.");
+    if (!hasExceptionalRegenerationAuthorization(stage)) {
+      throw createDataError("La regeneracion manual requiere una autorizacion excepcional activa.", {
+        code: "MANUAL_REGENERATION_NOT_AUTHORIZED",
+      });
+    }
+    const authorization = stage.metadata.exceptionalRegeneration;
+    const result = await tournamentStageService.regenerateCategoryStage(id, categoryId);
+    await auditService.record({
+      action: "manual_category_regeneration",
+      entityType: "tournament_category",
+      entityId: stage.id,
+      description: authorization.reason || "Regeneracion manual excepcional.",
+      actor,
+    });
+    return result;
+  },
   async updateZoneQualifiers(id, categoryId, zoneId, qualifiers) {
     return tournamentStageService.updateZoneQualifiers(id, categoryId, zoneId, qualifiers);
   },
-  async generateZoneEliminationBracket(id, categoryId) {
-    return tournamentStageService.generateZoneEliminationStage(id, categoryId);
+  async generateZoneEliminationBracket(id, categoryId, options = {}) {
+    return tournamentStageService.generateZoneEliminationStage(id, categoryId, options);
+  },
+  async resolveZoneEliminationBracket(id, categoryId, options = {}) {
+    return tournamentStageService.resolveZoneEliminationStageSlots(id, categoryId, options);
   },
   async generateAllCategoryBrackets(id) {
     return tournamentStageService.generateAllCategoryStages(id);

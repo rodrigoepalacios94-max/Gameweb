@@ -1,4 +1,6 @@
 import { DEFAULT_MATCH_FORMAT, formatResultSets } from "../utils/matchFormat";
+import { compareGameWinPercentage, isPerformanceSet } from "../utils/bestResultPerformance";
+import { buildTournamentStagePayload, buildZoneEliminationPayload } from "../domain/tournament-generation/stagePayload.js";
 import { buildPreliminaryBracketFromResults, buildZoneEliminationBracket, generateCategoryBracketInDb, TOURNAMENT_FORMATS } from "./tournamentCategoryService";
 import { rankingService } from "./rankingService";
 import { createDataError, ensureSupabaseDataClient, logSupabaseDataError } from "./supabaseDataUtils";
@@ -6,6 +8,7 @@ import { createDataError, ensureSupabaseDataClient, logSupabaseDataError } from 
 const tournamentSelect = `
   id,
   name,
+  status,
   match_format,
   metadata
 `;
@@ -112,6 +115,7 @@ function categoryLabel(category) {
 
 function mapDbPlayer(row, rankingMap, fallbackRanking) {
   const rankingEntry = rankingMap.get(row.id);
+  const ranking = rankingEntry?.position ?? fallbackRanking ?? null;
   return {
     id: row.id,
     firstName: row.first_name || "",
@@ -120,61 +124,168 @@ function mapDbPlayer(row, rankingMap, fallbackRanking) {
     avatar: row.avatar_url || "",
     avatarUrl: row.avatar_url || "",
     categoryId: row.current_category_id,
-    ranking: rankingEntry?.position || fallbackRanking,
+    ranking,
     points: rankingEntry?.points || 0,
   };
 }
 
-function normalizeDateInput(value, fallback = new Date()) {
-  const date = value instanceof Date ? value : new Date(value ?? fallback);
-  return Number.isNaN(date.getTime()) ? fallback : date;
+function paymentStatusFromDb(value) {
+  if (value === "paid" || value === "waived") return value;
+  return "pending";
 }
 
-function isEligibleRegistration(registration, now = new Date()) {
-  const nowDate = normalizeDateInput(now);
-  if (!registration || registration.status === "cancelled") return false;
-  if (["paid", "waived"].includes(registration.payment_status)) return true;
-  if (registration.payment_status !== "pending") return false;
-  if (!registration.payment_due_at) return true;
-  const dueAt = new Date(registration.payment_due_at);
-  return !Number.isNaN(dueAt.getTime()) && dueAt.getTime() >= nowDate.getTime();
+function registrationCategories(registration) {
+  return Array.isArray(registration?.registration_categories) ? registration.registration_categories : [];
 }
 
-async function fetchTournamentCategoryParticipantRows(tournamentCategoryId) {
+function selectedRegistrationCategories(registration) {
+  return Array.isArray(registration?.selected_registration_categories)
+    ? registration.selected_registration_categories
+    : registrationCategories(registration);
+}
+
+function mapParticipantEnrollment(registration, tournamentCategoryId) {
+  const paymentStatus = paymentStatusFromDb(registration.payment_status);
+  const categories = registrationCategories(registration);
+  const activeCategories = categories.filter((item) => item?.status !== "cancelled");
+  const distinctCategoryIds = new Set(activeCategories.map((item) => item.tournament_category_id).filter(Boolean));
+  const currentCategory = activeCategories.find((item) => item.tournament_category_id === tournamentCategoryId) || activeCategories[0] || null;
+  return {
+    registrationId: registration.id,
+    playerId: registration.player_id,
+    status: registration.status === "cancelled" ? "Rechazada" : "Confirmada",
+    registrationStatus: registration.status === "cancelled" ? "cancelled" : "confirmed",
+    paymentStatus,
+    paymentState: paymentStatus === "pending" ? "PENDING_PAYMENT" : "APPROVED",
+    payment: paymentStatus === "waived" ? "Liberado" : paymentStatus === "paid" ? "Aprobado" : "Pendiente",
+    categoryName: currentCategory?.category_name || "",
+    categories: activeCategories.map((item) => item.category_name).filter(Boolean),
+    totalAmount: Number(registration.total_amount || 0),
+    price: Number(registration.total_amount || registration.unit_price || 0),
+    isLegacyMultiCategory: !registration.tournament_category_id && distinctCategoryIds.size > 1,
+  };
+}
+
+async function fetchPublicPlayersByIds(playerIds = []) {
+  const ids = [...new Set((playerIds || []).filter(Boolean))];
+  if (!ids.length) return new Map();
   const client = ensureSupabaseDataClient();
-  const selectParticipantRows = `
+  const { data, error } = await client
+    .from("players")
+    .select("id, first_name, last_name")
+    .in("id", ids);
+  if (error) {
+    logSupabaseDataError("public tournament participant players", {
+      ...error,
+      table: "players",
+      select: "id, first_name, last_name",
+      filter: `id in (${ids.join(",")})`,
+    });
+    throw createDataError("No pudimos cargar los participantes.", { cause: error });
+  }
+  return new Map((data || []).map((player) => [player.id, player]));
+}
+
+async function fetchTournamentCategoryParticipantRows(tournamentCategoryId, { includePaymentData = false, includeAvatar = false } = {}) {
+  const client = ensureSupabaseDataClient();
+  const playerSelect = includeAvatar
+    ? "id, first_name, last_name, avatar_url"
+    : "id, first_name, last_name";
+  const selectParticipantRows = includePaymentData ? `
+      id,
       player_id,
       status,
+      tournament_category_id,
       payment_status,
-      payment_due_at,
-      registration_categories!inner (
-        tournament_category_id
+      total_amount,
+      unit_price,
+      selected_registration_categories:registration_categories!inner (
+        tournament_category_id,
+        status
+      ),
+      registration_categories (
+        tournament_category_id,
+        category_name,
+        status
       ),
       players:player_id (
-        id,
-        first_name,
-        last_name,
-        avatar_url,
-        current_category_id
+        ${playerSelect}
+      )
+    ` : `
+      id,
+      player_id,
+      status,
+      registration_categories!inner (
+        tournament_category_id,
+        status
+      ),
+      players:player_id (
+        ${playerSelect}
       )
     `;
+  const categoryFilter = includePaymentData
+    ? "selected_registration_categories.tournament_category_id"
+    : "registration_categories.tournament_category_id";
   const { data, error } = await client
     .from("registrations")
     .select(selectParticipantRows)
-    .eq("registration_categories.tournament_category_id", tournamentCategoryId);
+    .neq("status", "cancelled")
+    .eq(categoryFilter, tournamentCategoryId);
   if (error) {
     logSupabaseDataError("tournament category participants", {
       ...error,
       table: "registrations",
       select: selectParticipantRows,
-      filter: `registration_categories.tournament_category_id eq ${tournamentCategoryId}`,
+      filter: `${categoryFilter} eq ${tournamentCategoryId}`,
     });
     throw createDataError("No pudimos cargar los inscriptos de la categoria.", { cause: error });
   }
-  return (data || []).filter((registration) => isEligibleRegistration(registration));
+  return (data || []).filter((registration) =>
+    registration?.status !== "cancelled" &&
+    selectedRegistrationCategories(registration).some((item) =>
+      item?.tournament_category_id === tournamentCategoryId &&
+      item?.status !== "cancelled"
+    )
+  );
 }
 
-export async function getTournamentCategoryParticipants(tournamentCategoryId, { categoryId = null, withRanking = true } = {}) {
+export async function getPublicTournamentCategoryParticipants(tournamentCategoryId, { categoryId = null } = {}) {
+  if (!tournamentCategoryId) return [];
+  const client = ensureSupabaseDataClient();
+  const { data: stage, error: stageError } = await client
+    .from("tournament_categories")
+    .select("category_id, metadata")
+    .eq("id", tournamentCategoryId)
+    .maybeSingle();
+  if (stageError) {
+    logSupabaseDataError("public participant stage lookup", {
+      ...stageError,
+      table: "tournament_categories",
+      select: "category_id, metadata",
+      filter: `id eq ${tournamentCategoryId}`,
+    });
+    throw createDataError("No pudimos cargar la categoria del torneo.", { cause: stageError });
+  }
+
+  const effectiveCategoryId = categoryId || stage?.category_id || null;
+  const participantIds = [...new Set((stage?.metadata?.participants || []).filter(Boolean))];
+  if (!participantIds.length) return [];
+
+  const [playersById, ranking] = await Promise.all([
+    fetchPublicPlayersByIds(participantIds),
+    effectiveCategoryId
+      ? rankingService.getEffectiveRankingPositions(effectiveCategoryId, participantIds)
+      : Promise.resolve({ entries: [] }),
+  ]);
+  const rankingMap = new Map((ranking.entries || []).map((entry) => [entry.playerId, { position: entry.position, points: entry.points }]));
+
+  return participantIds
+    .map((playerId) => playersById.get(playerId))
+    .filter(Boolean)
+    .map((player) => mapDbPlayer(player, rankingMap, null));
+}
+
+export async function getTournamentCategoryParticipants(tournamentCategoryId, { categoryId = null, withRanking = true, includePaymentData = false, includeAvatar = false, fallbackRanking = true } = {}) {
   if (!tournamentCategoryId) return [];
   let effectiveCategoryId = categoryId;
   let tournamentCategoryName = "";
@@ -190,14 +301,24 @@ export async function getTournamentCategoryParticipants(tournamentCategoryId, { 
   }
   effectiveCategoryId = effectiveCategoryId || stage?.category_id || null;
   tournamentCategoryName = categoryLabel(stage?.categories);
-  const [rows, ranking] = await Promise.all([
-    fetchTournamentCategoryParticipantRows(tournamentCategoryId),
-    withRanking && effectiveCategoryId ? rankingService.getEffectiveRankingOrder(effectiveCategoryId) : Promise.resolve({ entries: [] }),
-  ]);
+  const rows = await fetchTournamentCategoryParticipantRows(tournamentCategoryId, {
+    includePaymentData,
+    includeAvatar,
+  });
+  const playerIds = [...new Set(rows.map((registration) => registration.player_id).filter(Boolean))];
+  const ranking = withRanking && effectiveCategoryId
+    ? await rankingService.getEffectiveRankingPositions(effectiveCategoryId, playerIds)
+    : { entries: [] };
   const rankingMap = new Map((ranking.entries || []).map((entry) => [entry.playerId, { position: entry.position, points: entry.points }]));
   const seen = new Set();
   return rows
-    .map((registration, index) => mapDbPlayer(registration.players, rankingMap, index + 999))
+    .map((registration, index) => {
+      const player = mapDbPlayer(registration.players, rankingMap, fallbackRanking ? index + 999 : null);
+      return {
+        ...player,
+        enrollment: includePaymentData ? mapParticipantEnrollment(registration, tournamentCategoryId) : null,
+      };
+    })
     .filter((player) => {
       if (!player?.id || seen.has(player.id)) return false;
       seen.add(player.id);
@@ -223,12 +344,83 @@ function normalizeDbStatus(status, resultType = "NORMAL") {
   return "pending";
 }
 
+export function isAdministrativeByeMatchRecord(match) {
+  const resultType = String(match?.result_type || match?.resultType || match?.resultDetail?.type || "").toUpperCase();
+  return resultType === "BYE" || Boolean(match?.bye);
+}
+
+export function isRegenerationBlockingSportResult(match, options = {}) {
+  if (!match || isAdministrativeByeMatchRecord(match)) return false;
+  const status = normalizeDbStatus(match.status, match.result_type || match.resultType);
+  const phase = String(match.phase || "").toLowerCase();
+  const allowFinishedPreliminaries = Boolean(options.allowFinishedPreliminaries);
+  const allowFinishedZones = Boolean(options.allowFinishedZones);
+  const winnerId = match.winner_id || match.winnerId;
+  const loserId = match.loser_id || match.loserId;
+  if (allowFinishedPreliminaries && phase === "preliminar" && status === "finished" && winnerId) return false;
+  if (allowFinishedZones && phase === "zonas" && status === "finished" && winnerId) return false;
+  const hasRealSets = Array.isArray(match.match_sets || match.sets) && (match.match_sets || match.sets).length > 0;
+  if (hasRealSets) return true;
+  if (String(match.result_text || match.result || "").trim()) return true;
+  return ["finished", "in_progress", "standby"].includes(status) || Boolean(winnerId || loserId);
+}
+
+async function assertStageCanBeRegenerated(tournamentCategoryId, options = {}) {
+  if (!tournamentCategoryId) return true;
+  const client = ensureSupabaseDataClient();
+  const { data, error } = await client
+    .from("matches")
+    .select("id, phase, status, result_type, result_text, winner_id, loser_id, match_sets(id)")
+    .eq("tournament_category_id", tournamentCategoryId);
+  if (error) {
+    logSupabaseDataError("stage regeneration safety check", {
+      ...error,
+      table: "matches",
+      select: "id, phase, status, result_type, winner_id",
+      filter: `tournament_category_id eq ${tournamentCategoryId}`,
+    });
+    throw createDataError("No pudimos validar si el cuadro puede regenerarse.", { cause: error });
+  }
+  const blockingMatch = (data || []).find((match) => isRegenerationBlockingSportResult(match, options));
+  if (blockingMatch) {
+    throw createDataError("Este cuadro ya contiene resultados de partidos disputados y no puede regenerarse de forma segura.", {
+      code: "STAGE_HAS_SPORT_RESULTS",
+    });
+  }
+  return true;
+}
+
 function uiSetToPayload(set, index) {
   return {
     setNumber: Number(set.setNumber || index + 1),
     player1Score: Number(set.player1Score ?? set.playerAScore ?? set.playerA ?? set.a ?? 0),
     player2Score: Number(set.player2Score ?? set.playerBScore ?? set.playerB ?? set.b ?? 0),
     type: set.type || (set.superTieBreak ? "super_tiebreak" : "set"),
+  };
+}
+
+function preliminaryPerformanceFromSets(match, playerId) {
+  const isPlayerA = match.playerAId === playerId;
+  const isPlayerB = match.playerBId === playerId;
+  if (!isPlayerA && !isPlayerB) return { score: -999, setsWon: 0, setsLost: 0, gamesWon: 0, gamesLost: 0 };
+  const totals = { setsWon: 0, setsLost: 0, gamesWon: 0, gamesLost: 0 };
+  (match.sets || []).forEach((set) => {
+    const a = Number(set.playerAScore ?? set.playerA ?? set.player1Score ?? set.a ?? 0);
+    const b = Number(set.playerBScore ?? set.playerB ?? set.player2Score ?? set.b ?? 0);
+    const own = isPlayerA ? a : b;
+    const other = isPlayerA ? b : a;
+    totals.gamesWon += own;
+    totals.gamesLost += other;
+    if (own > other) totals.setsWon += 1;
+    if (other > own) totals.setsLost += 1;
+  });
+  const resultType = String(match.resultType || match.resultDetail?.type || "").toUpperCase();
+  const administrativeLoss = match.loserId === playerId && ["WO", "DOUBLE_WO"].includes(resultType);
+  return {
+    ...totals,
+    score: administrativeLoss
+      ? -999
+      : ((totals.setsWon - totals.setsLost) * 1000) + (totals.gamesWon - totals.gamesLost),
   };
 }
 
@@ -264,6 +456,10 @@ function readRoundMatchTempId(round, match, matchIndex) {
   return match.matchId || makeTempId("round", round.id || round.name, match.id || matchIndex + 1);
 }
 
+function readRoundSlotTempId(round, match, matchIndex) {
+  return makeTempId("round", round.id || round.name, match.id || matchIndex + 1);
+}
+
 function collectRoundMatches(bracket, matchMap) {
   (bracket.rounds || []).forEach((round, roundIndex) => {
     (round.matches || []).forEach((match, matchIndex) => {
@@ -288,6 +484,8 @@ function collectRoundMatches(bracket, matchMap) {
           connectionNote: match.connectionNote || null,
           playerALabel: match.playerA || null,
           playerBLabel: match.playerB || null,
+          playerASource: match.playerASource || null,
+          playerBSource: match.playerBSource || null,
         },
       });
     });
@@ -371,6 +569,8 @@ function enrichRoundMetadata(bracket, matchMap) {
         connectionNote: match.connectionNote || entry.metadata?.connectionNote || null,
         playerALabel: match.playerA || entry.metadata?.playerALabel || null,
         playerBLabel: match.playerB || entry.metadata?.playerBLabel || null,
+        playerASource: match.playerASource || entry.metadata?.playerASource || null,
+        playerBSource: match.playerBSource || entry.metadata?.playerBSource || null,
       };
     });
   });
@@ -387,7 +587,8 @@ function findChildByWinnerLabel(parentRound, parentIndex, nextRound) {
 
 function fallbackChild(parentRound, parentIndex, nextRound) {
   const isRoundOf32 = String(parentRound.id || parentRound.name || "").includes("32");
-  const childIndex = isRoundOf32 && nextRound.matches.length > 1
+  const useEdgeSlots = isRoundOf32 && nextRound.matches.length > 1 && (parentRound.matches || []).length === 2;
+  const childIndex = useEdgeSlots
     ? (parentIndex === 0 ? 0 : nextRound.matches.length - 1)
     : Math.floor(parentIndex / 2);
   const childMatch = nextRound.matches[childIndex];
@@ -395,13 +596,24 @@ function fallbackChild(parentRound, parentIndex, nextRound) {
   return {
     childMatch,
     childIndex,
-    childSlot: isRoundOf32 ? 2 : (parentIndex % 2 === 0 ? 1 : 2),
+    childSlot: useEdgeSlots ? 2 : (parentIndex % 2 === 0 ? 1 : 2),
+    inferred: true,
   };
+}
+
+function isOpenFallbackSlot(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return !normalized
+    || normalized === "a definir"
+    || normalized === "bye"
+    || normalized.startsWith("clasificado")
+    || normalized.startsWith("ganador ");
 }
 
 function buildConnections(bracket) {
   const connections = [];
-  const seen = new Set();
+  const seenEdges = new Set();
+  const seenChildSlots = new Set();
   const rounds = bracket.rounds || [];
   for (let roundIndex = 0; roundIndex < rounds.length - 1; roundIndex += 1) {
     const round = rounds[roundIndex];
@@ -409,12 +621,47 @@ function buildConnections(bracket) {
     (round.matches || []).forEach((match, matchIndex) => {
       const parentTempId = readRoundMatchTempId(round, match, matchIndex);
       const child = findChildByWinnerLabel(round, matchIndex, nextRound) || fallbackChild(round, matchIndex, nextRound);
-      if (!child) return;
+      if (!child) {
+        throw createDataError("La llave generada deja un partido sin progresion definida.", {
+          code: "ORPHAN_MATCH_PROGRESSION",
+          parentTempId,
+          parentRound: round.name,
+          parentMatch: matchIndex + 1,
+        });
+      }
       const childTempId = readRoundMatchTempId(nextRound, child.childMatch, child.childIndex);
       if (!parentTempId || !childTempId || parentTempId === childTempId) return;
-      const key = `${parentTempId}->${childTempId}:${child.childSlot}`;
-      if (seen.has(key)) return;
-      seen.add(key);
+      const childPlayerId = matchPlayerId(child.childMatch, child.childSlot);
+      if (childPlayerId) {
+        throw createDataError("La llave generada intenta conectar un ganador a un slot ya ocupado.", {
+          code: "OVERFILLED_MATCH_CONNECTION_SLOT",
+          parentTempId,
+          childTempId,
+          childSlot: child.childSlot,
+          childPlayerId,
+        });
+      }
+      if (child.inferred && !isOpenFallbackSlot(matchPlayerName(child.childMatch, child.childSlot))) {
+        throw createDataError("La llave generada intenta inferir una conexion sobre un slot con etiqueta concreta.", {
+          code: "OVERFILLED_MATCH_CONNECTION_LABEL",
+          parentTempId,
+          childTempId,
+          childSlot: child.childSlot,
+          childLabel: matchPlayerName(child.childMatch, child.childSlot),
+        });
+      }
+      const edgeKey = `${parentTempId}->${childTempId}:${child.childSlot}`;
+      if (seenEdges.has(edgeKey)) return;
+      const childSlotKey = `${childTempId}:${child.childSlot}`;
+      if (seenChildSlots.has(childSlotKey)) {
+        throw createDataError("La llave generada intenta conectar dos ganadores al mismo slot.", {
+          code: "DUPLICATE_MATCH_CONNECTION_SLOT",
+          childTempId,
+          childSlot: child.childSlot,
+        });
+      }
+      seenEdges.add(edgeKey);
+      seenChildSlots.add(childSlotKey);
       connections.push({ parentTempId, childTempId, childSlot: child.childSlot });
     });
   }
@@ -441,35 +688,16 @@ function buildPreliminaryRankings(bracket, db) {
   db.matches
     .filter((match) => match.phase === "Preliminar" && match.winnerId)
     .forEach((match, index) => {
-      const totals = {
-        [match.playerAId]: { setsWon: 0, setsLost: 0, gamesWon: 0, gamesLost: 0 },
-        [match.playerBId]: { setsWon: 0, setsLost: 0, gamesWon: 0, gamesLost: 0 },
-      };
-      (match.sets || []).forEach((set) => {
-        const a = Number(set.playerAScore ?? set.playerA ?? set.a ?? 0);
-        const b = Number(set.playerBScore ?? set.playerB ?? set.b ?? 0);
-        totals[match.playerAId].gamesWon += a;
-        totals[match.playerAId].gamesLost += b;
-        totals[match.playerBId].gamesWon += b;
-        totals[match.playerBId].gamesLost += a;
-        if (a > b) {
-          totals[match.playerAId].setsWon += 1;
-          totals[match.playerBId].setsLost += 1;
-        } else if (b > a) {
-          totals[match.playerBId].setsWon += 1;
-          totals[match.playerAId].setsLost += 1;
-        }
-      });
       [match.playerAId, match.playerBId].filter(Boolean).forEach((playerId) => {
         const won = match.winnerId === playerId;
-        const metrics = totals[playerId] || {};
+        const metrics = preliminaryPerformanceFromSets(match, playerId);
         rows.push({
           playerId,
           matchTempId: match.id,
           position: index + 1,
           role: won ? "ganador_preliminar" : "perdedor_preliminar",
           won,
-          performanceScore: won ? (match.preliminaryScore ?? 0) : (match.loserPreliminaryScore ?? 0),
+          performanceScore: metrics.score,
           setsWon: metrics.setsWon || 0,
           setsLost: metrics.setsLost || 0,
           gamesWon: metrics.gamesWon || 0,
@@ -516,7 +744,7 @@ function buildPayload(db, bracket, stage, options = {}) {
     status: zone.status === "Finalizada" ? "finished" : "pending",
     players: (zone.playerIds || []).map((playerId, index) => ({
       playerId,
-      seedOrder: index + 1,
+      seedOrder: Number(zone.seedOrders?.[index] || index + 1),
       finalPosition: null,
       qualified: false,
       statsSnapshot: {},
@@ -540,6 +768,7 @@ function buildPayload(db, bracket, stage, options = {}) {
     connections: buildConnections(bracket),
     preliminaryRankings: buildPreliminaryRankings(bracket, db),
     allowFinishedPreliminaries: Boolean(options.allowFinishedPreliminaries),
+    manualRegeneration: Boolean(options.manualRegeneration),
   };
 }
 
@@ -621,7 +850,8 @@ function buildVirtualDb({ tournament, stage, players }) {
 
 async function persistGeneratedStage(tournamentId, categoryId, db, bracket, stage, options = {}) {
   const client = ensureSupabaseDataClient();
-  const payload = buildPayload(db, bracket, stage, options);
+  await assertStageCanBeRegenerated(stage.id, options);
+  const payload = buildTournamentStagePayload(db, bracket, stage, options);
   const { data: rpcData, error } = await client.rpc("persist_tournament_stage", {
     p_tournament_id: tournamentId,
     p_category_id: categoryId,
@@ -632,6 +862,122 @@ async function persistGeneratedStage(tournamentId, categoryId, db, bracket, stag
     throw createDataError("No pudimos persistir la fase generada.", { cause: error });
   }
   return applyDbIdsToBracket(payload.bracketData, rpcData);
+}
+
+async function persistZoneEliminationStage(tournamentId, categoryId, db, bracket, stage, options = {}) {
+  const client = ensureSupabaseDataClient();
+  const payload = buildZoneEliminationPayload(db, bracket, stage, options);
+  const { data: rpcData, error } = await client.rpc("persist_zone_elimination_stage", {
+    p_tournament_id: tournamentId,
+    p_category_id: categoryId,
+    p_payload: payload,
+  });
+  if (error) {
+    logSupabaseDataError("persist zone elimination stage", error);
+    throw createDataError("No pudimos persistir la llave generada desde zonas.", { cause: error });
+  }
+  return applyDbIdsToBracket(payload.bracketData, rpcData);
+}
+
+function assertTournamentRegistrationsClosed(tournament) {
+  if (tournament?.status === "open" || tournament?.status === "Inscripciones abiertas") {
+    throw createDataError("Cerrá las inscripciones para elegir el formato de clasificación.", {
+      code: "REGISTRATIONS_OPEN",
+    });
+  }
+}
+
+function collectBracketSlotEntries(bracket) {
+  const entries = [];
+  (bracket.rounds || []).forEach((round, roundIndex) => {
+    (round.matches || []).forEach((match, matchIndex) => {
+      const tempId = readRoundSlotTempId(round, match, matchIndex);
+      entries.push({
+        tempId,
+        roundIndex,
+        bracketSlot: matchIndex + 1,
+        player1Id: match.playerAId || null,
+        player2Id: match.playerBId || null,
+        metadata: {
+          bracketMatchId: match.id,
+          connectionNote: match.connectionNote || null,
+          playerALabel: match.playerA || null,
+          playerBLabel: match.playerB || null,
+          playerASource: match.playerASource || null,
+          playerBSource: match.playerBSource || null,
+          temporaryId: tempId,
+        },
+      });
+    });
+  });
+  return entries;
+}
+
+function isSportLockedMatch(match) {
+  const status = String(match?.status || "").toLowerCase();
+  if (["finished", "in_progress"].includes(status)) return true;
+  return Boolean(match?.winner_id || match?.loser_id || match?.result_text);
+}
+
+function mergeSlotMetadata(existingMetadata, nextMetadata) {
+  return {
+    ...(existingMetadata || {}),
+    ...(nextMetadata || {}),
+    temporaryId: nextMetadata?.temporaryId || existingMetadata?.temporaryId || null,
+  };
+}
+
+function applyExistingMatchIdsToBracket(bracket, existingByTempId) {
+  const copy = cloneJson(bracket);
+  (copy.rounds || []).forEach((round) => {
+    (round.matches || []).forEach((match, matchIndex) => {
+      const tempId = readRoundSlotTempId(round, match, matchIndex);
+      const existing = existingByTempId.get(tempId);
+      if (existing?.id) match.matchId = existing.id;
+    });
+  });
+  return copy;
+}
+
+export function buildZoneBracketSlotResolutionPlan(bracket, existingMatches = []) {
+  const entries = collectBracketSlotEntries(bracket);
+  const existingByTempId = new Map();
+  (existingMatches || []).forEach((match) => {
+    const tempId = match?.metadata?.temporaryId;
+    if (tempId) existingByTempId.set(tempId, match);
+  });
+
+  const updates = entries.map((entry) => {
+    const existing = existingByTempId.get(entry.tempId);
+    if (!existing) {
+      throw createDataError("No encontramos un partido existente para resolver la llave de zonas sin regenerarla.", {
+        code: "ZONE_SLOT_MATCH_NOT_FOUND",
+        tempId: entry.tempId,
+      });
+    }
+    if (isSportLockedMatch(existing)) {
+      throw createDataError("La llave ya tiene resultados cargados y no puede actualizarse automáticamente.", {
+        code: "ZONE_SLOT_MATCH_LOCKED",
+        matchId: existing.id,
+      });
+    }
+    return {
+      id: existing.id,
+      tempId: entry.tempId,
+      player1Id: entry.player1Id,
+      player2Id: entry.player2Id,
+      metadata: mergeSlotMetadata(existing.metadata, entry.metadata),
+      changed:
+        (existing.player1_id || null) !== (entry.player1Id || null) ||
+        (existing.player2_id || null) !== (entry.player2Id || null) ||
+        JSON.stringify(mergeSlotMetadata(existing.metadata, entry.metadata)) !== JSON.stringify(existing.metadata || {}),
+    };
+  });
+
+  return {
+    updates,
+    bracket: applyExistingMatchIdsToBracket(bracket, existingByTempId),
+  };
 }
 
 function setsFromRow(row) {
@@ -680,7 +1026,7 @@ function buildZoneStandings(zone, zoneMatches, playersById) {
         rowB.wins += 1;
         rowA.losses += 1;
       }
-      setsFromRow(match).forEach((set) => {
+      setsFromRow(match).filter(isPerformanceSet).forEach((set) => {
         rowA.gamesWon += set.playerAScore;
         rowA.gamesLost += set.playerBScore;
         rowB.gamesWon += set.playerBScore;
@@ -696,8 +1042,8 @@ function buildZoneStandings(zone, zoneMatches, playersById) {
     });
   rows.sort((a, b) =>
     b.wins - a.wins
-    || (b.setsWon - b.setsLost) - (a.setsWon - a.setsLost)
-    || (b.gamesWon - b.gamesLost) - (a.gamesWon - a.gamesLost)
+    || b.setsWon - a.setsWon
+    || compareGameWinPercentage(b, a)
     || a.ranking - b.ranking
   );
   rows.forEach((row, index) => {
@@ -727,14 +1073,19 @@ async function loadPersistedVirtualDb(tournamentId, categoryId) {
   bracket.zones = (data?.zones || []).map((zone) => {
     const zoneMatches = (data?.matches || []).filter((match) => match.zone_id === zone.id);
     const standings = buildZoneStandings(zone, zoneMatches, playersById);
+    const expectedMatches = Math.max(0, (zone.zone_players || []).length * ((zone.zone_players || []).length - 1) / 2);
+    const finishedMatches = zoneMatches.filter((match) => match.status === "finished" && match.winner_id).length;
+    const standingsResolved = expectedMatches > 0 && finishedMatches >= expectedMatches;
     return {
       id: zone.id,
       name: zone.name,
       qualifiers: zone.qualifiers_count,
       players: (zone.zone_players || []).map((item) => fullName(playersById.get(item.player_id) || item.players)),
       playerIds: (zone.zone_players || []).map((item) => item.player_id),
+      seedOrders: (zone.zone_players || []).map((item) => Number(item.seed_order || 9999)),
       size: (zone.zone_players || []).length,
       status: zone.status,
+      standingsResolved,
       standings,
     };
   });
@@ -751,6 +1102,7 @@ async function loadPersistedVirtualDb(tournamentId, categoryId) {
     status: match.status === "finished" ? "Finalizado" : "Pendiente",
     result: match.result_text,
     resultDetail: match.result_detail,
+    resultType: match.result_type,
     sets: setsFromRow(match),
     winnerId: match.winner_id,
     loserId: match.loser_id,
@@ -761,20 +1113,21 @@ async function loadPersistedVirtualDb(tournamentId, categoryId) {
 }
 
 export const tournamentStageService = {
-  async generateDirectEliminationStage(tournamentId, categoryId) {
-    return this.generateStage(tournamentId, categoryId);
+  async generateDirectEliminationStage(tournamentId, categoryId, options = {}) {
+    return this.generateStage(tournamentId, categoryId, options);
   },
 
-  async generatePreliminaryStage(tournamentId, categoryId) {
-    return this.generateStage(tournamentId, categoryId);
+  async generatePreliminaryStage(tournamentId, categoryId, options = {}) {
+    return this.generateStage(tournamentId, categoryId, options);
   },
 
-  async generateZoneStage(tournamentId, categoryId) {
-    return this.generateStage(tournamentId, categoryId);
+  async generateZoneStage(tournamentId, categoryId, options = {}) {
+    return this.generateStage(tournamentId, categoryId, options);
   },
 
-  async generateStage(tournamentId, categoryId) {
+  async generateStage(tournamentId, categoryId, options = {}) {
     const { tournament, stage } = await fetchStageSeed(tournamentId, categoryId);
+    assertTournamentRegistrationsClosed(tournament);
     const players = await fetchParticipants(tournamentId, stage);
     const db = buildVirtualDb({ tournament, stage, players });
     const virtualStage = db.tournaments[0].categoryStages[0];
@@ -794,13 +1147,30 @@ export const tournamentStageService = {
       }
     }
 
-    const bracket = generateCategoryBracketInDb(db, tournamentId, categoryId);
+    const bracket = generateCategoryBracketInDb(db, tournamentId, categoryId, {
+      schedulingContext: options.schedulingContext || options.generationContext || null,
+    });
     if (!bracket) throw createDataError("No pudimos generar la estructura deportiva.");
     return persistGeneratedStage(tournamentId, categoryId, db, bracket, virtualStage);
   },
 
-  async generateAllCategoryStages(tournamentId) {
+  async regenerateCategoryStage(tournamentId, categoryId) {
+    const { tournament, stage } = await fetchStageSeed(tournamentId, categoryId);
+    assertTournamentRegistrationsClosed(tournament);
+    const players = await fetchParticipants(tournamentId, stage);
+    const db = buildVirtualDb({ tournament, stage, players });
+    const virtualStage = db.tournaments[0].categoryStages[0];
+    validateFormat(virtualStage);
+    const bracket = generateCategoryBracketInDb(db, tournamentId, categoryId);
+    if (!bracket) throw createDataError("No pudimos regenerar la estructura deportiva.");
+    return persistGeneratedStage(tournamentId, categoryId, db, bracket, virtualStage, {
+      manualRegeneration: true,
+    });
+  },
+
+  async generateAllCategoryStages(tournamentId, options = {}) {
     const client = ensureSupabaseDataClient();
+    const categoryFilter = new Set((options.categoryIds || []).filter(Boolean));
     const { data, error } = await client.from("tournament_categories").select("id, category_id").eq("tournament_id", tournamentId);
     if (error) {
       logSupabaseDataError("stage categories list", error);
@@ -808,9 +1178,12 @@ export const tournamentStageService = {
     }
     const generated = [];
     for (const row of data || []) {
+      if (categoryFilter.size && !categoryFilter.has(row.category_id)) continue;
       const participants = await getTournamentCategoryParticipants(row.id, { categoryId: row.category_id, withRanking: false });
       if (!participants.length) continue;
-      generated.push(await this.generateStage(tournamentId, row.category_id));
+      generated.push(await this.generateStage(tournamentId, row.category_id, {
+        schedulingContext: options.schedulingContext || options.generationContext || null,
+      }));
     }
     return generated;
   },
@@ -860,13 +1233,97 @@ export const tournamentStageService = {
     return data;
   },
 
-  async generateZoneEliminationStage(tournamentId, categoryId) {
+  async generateZoneEliminationStage(tournamentId, categoryId, options = {}) {
     const { db, tournament, stage, bracket } = await loadPersistedVirtualDb(tournamentId, categoryId);
     if (stage.format !== "Zonas") throw createDataError("La categoria no utiliza formato Zonas.");
-    const result = buildZoneEliminationBracket(db, tournament, stage, bracket);
+    assertTournamentRegistrationsClosed(tournament);
+    const result = buildZoneEliminationBracket(db, tournament, stage, bracket, options);
     if (!result?.ok) return result;
-    const persistedBracket = await persistGeneratedStage(tournamentId, categoryId, db, result.bracket, stage);
+    const persistedBracket = await persistZoneEliminationStage(tournamentId, categoryId, db, result.bracket, stage, {
+      allowFinishedZones: true,
+    });
     return { ...result, bracket: persistedBracket };
+  },
+
+  async resolveZoneEliminationStageSlots(tournamentId, categoryId, options = {}) {
+    const client = ensureSupabaseDataClient();
+    const { db, tournament, stage, bracket } = await loadPersistedVirtualDb(tournamentId, categoryId);
+    if (stage.format !== "Zonas") throw createDataError("La categoria no utiliza formato Zonas.");
+    assertTournamentRegistrationsClosed(tournament);
+    const result = buildZoneEliminationBracket(db, tournament, stage, bracket, options);
+    if (!result?.ok) return result;
+
+    const { data: persisted, error: persistedError } = await client
+      .from("tournament_categories")
+      .select(`
+        id,
+        brackets (
+          id,
+          bracket_data
+        ),
+        matches (
+          id,
+          phase,
+          status,
+          player1_id,
+          player2_id,
+          winner_id,
+          loser_id,
+          result_text,
+          metadata
+        )
+      `)
+      .eq("tournament_id", tournamentId)
+      .eq("category_id", categoryId)
+      .maybeSingle();
+    if (persistedError) {
+      logSupabaseDataError("zone slot resolution lookup", persistedError);
+      throw createDataError("No pudimos cargar la llave existente para actualizarla.", { cause: persistedError });
+    }
+    const bracketRow = persisted?.brackets?.[0];
+    if (!bracketRow?.id) throw createDataError("No encontramos la llave existente para actualizar.");
+    const existingMatches = (persisted?.matches || []).filter((match) => match.phase === "Cuadro principal");
+    const plan = buildZoneBracketSlotResolutionPlan(result.bracket, existingMatches);
+
+    for (const update of plan.updates.filter((item) => item.changed)) {
+      const { error } = await client
+        .from("matches")
+        .update({
+          player1_id: update.player1Id,
+          player2_id: update.player2Id,
+          metadata: update.metadata,
+        })
+        .eq("id", update.id);
+      if (error) {
+        logSupabaseDataError("zone slot resolution match update", {
+          ...error,
+          table: "matches",
+          update: "player1_id, player2_id, metadata",
+          filter: `id eq ${update.id}`,
+        });
+        throw createDataError("No pudimos actualizar los jugadores de la llave de zonas.", { cause: error });
+      }
+    }
+
+    const { error: bracketError } = await client
+      .from("brackets")
+      .update({ bracket_data: plan.bracket })
+      .eq("id", bracketRow.id);
+    if (bracketError) {
+      logSupabaseDataError("zone slot resolution bracket update", {
+        ...bracketError,
+        table: "brackets",
+        update: "bracket_data",
+        filter: `id eq ${bracketRow.id}`,
+      });
+      throw createDataError("No pudimos actualizar la vista de la llave de zonas.", { cause: bracketError });
+    }
+
+    return {
+      ...result,
+      bracket: plan.bracket,
+      updatedMatches: plan.updates.filter((item) => item.changed).length,
+    };
   },
 
   async loadTournamentCategoryStage(tournamentId, categoryId) {
